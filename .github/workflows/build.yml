@@ -46,12 +46,14 @@ jobs:
       - shell: pwsh
         run: |
           python scripts/toolset.py stage-windows --archive artifacts/upstream/nsis-3.12.zip --stage stage --work artifacts/work
-          $version = & stage/hosts/win/makensis.cmd -VERSION
+          $env:NSISDIR = (Resolve-Path stage/common).Path
+          $version = & stage/hosts/win/makensis.exe -VERSION
           if ($version -ne 'v3.12') { throw "Unexpected version: $version" }
+          if ((& stage/hosts/win/makensis.cmd -VERSION) -ne 'v3.12') { throw 'Convenience launcher failed' }
           New-Item -ItemType Directory artifacts/smoke | Out-Null
           Copy-Item fixtures/minimal.nsi artifacts/smoke/
           Push-Location artifacts/smoke
-          & ../../stage/hosts/win/makensis.cmd minimal.nsi
+          & ../../stage/hosts/win/makensis.exe minimal.nsi
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path smoke-installer.exe)) { throw 'Windows compiler smoke test failed' }
           Pop-Location
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -106,7 +108,9 @@ jobs:
           mkdir -p artifacts/smoke
           cp fixtures/minimal.nsi artifacts/smoke/
           cd artifacts/smoke
-          "../smoke-stage/hosts/${{ matrix.rid }}/makensis" minimal.nsi
+          export NSISDIR="$(cd ../smoke-stage/common && pwd)"
+          "../smoke-stage/hosts/${{ matrix.rid }}/makensis.bin" minimal.nsi
+          "../smoke-stage/hosts/${{ matrix.rid }}/makensis" -VERSION | grep -Fx v3.12
           test -f smoke-installer.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -158,7 +162,9 @@ jobs:
           mkdir -p "artifacts/relocated smoke"
           cp fixtures/minimal.nsi "artifacts/relocated smoke/"
           cd "artifacts/relocated smoke"
-          "../relocated toolset/hosts/linux-x64/makensis" minimal.nsi
+          export NSISDIR="$(cd '../relocated toolset/common' && pwd)"
+          "../relocated toolset/hosts/linux-x64/makensis.bin" minimal.nsi
+          "../relocated toolset/hosts/linux-x64/makensis" -VERSION | grep -Fx v3.12
           test -f smoke-installer.exe
       - run: python -m unittest discover -s tests -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

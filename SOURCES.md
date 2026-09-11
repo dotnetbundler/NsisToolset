@@ -4,12 +4,12 @@ Toolset revision: `3.12-r1`
 Upstream release: NSIS `3.12`  
 Reproducible timestamp (`SOURCE_DATE_EPOCH`): `1776631488` (`2026-04-19T20:44:48Z`)
 
-| Input | Official URL | Bytes | SHA-256 |
-|---|---|---:|---|
-| `nsis-3.12.zip` | <https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download> | 2,362,938 | `56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f` |
-| `nsis-3.12-src.tar.bz2` | <https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12-src.tar.bz2/download> | 1,818,389 | `f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186` |
+| Input | Official URL | Bytes | Upstream-published SHA-1 | Upstream-published MD5 | Locally-derived SHA-256 |
+| --- | --- | ---: | --- | --- | --- |
+| `nsis-3.12.zip` | <https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download> | 2,362,938 | `364fd795b0cafc1fbff3e966f103a8f8fc8fb7f1` | `757c22153dd8b90f5e297310d9966997` | `56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f` |
+| `nsis-3.12-src.tar.bz2` | <https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12-src.tar.bz2/download> | 1,818,389 | `432e99150881c061c7e313eb1aac45763d951572` | `8ec7c3e1228ac4eb96e5e421610b4aae` | `f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186` |
 
-The URLs are versioned SourceForge release URLs, not `latest` aliases. Redirects are allowed, but the downloaded bytes must match both the recorded size and SHA-256 before extraction.
+The URLs are versioned SourceForge release URLs, not `latest` aliases. SourceForge publishes SHA-1 and MD5 for these files; this project independently calculated SHA-256 from bytes downloaded through those official URLs. It does not claim that SourceForge published the SHA-256 values. Before extraction, the downloader requires the recorded byte size, upstream-published SHA-1, and locally-derived SHA-256 to match. MD5 is retained only as an upstream source-consistency record and is not a security acceptance check.
 
 ## Native compiler build
 
@@ -29,4 +29,3 @@ The common data and Windows runtime are copied from the verified standard ZIP. T
 ## Licenses
 
 NSIS licensing is preserved verbatim as `common/COPYING` in the release archive. This repository's original automation is MIT-licensed; see `LICENSE`. Consumers must retain and comply with upstream notices for redistributed NSIS files.
-

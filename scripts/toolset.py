@@ -25,23 +25,30 @@ def load_config(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
+def digest(path: Path, algorithm: str) -> str:
+    digest = hashlib.new(algorithm)
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
 
 
+def sha256(path: Path) -> str:
+    return digest(path, "sha256")
+
+
 def checked_file(path: Path, spec: dict) -> None:
     if not path.is_file():
         raise RuntimeError(f"missing input: {path}")
     actual_size = path.stat().st_size
-    actual_hash = sha256(path)
-    if actual_size != spec["size"] or actual_hash != spec["sha256"]:
+    actual_sha1 = digest(path, "sha1")
+    actual_sha256 = sha256(path)
+    expected_sha1 = spec["digests"]["upstreamPublished"]["sha1"]
+    expected_sha256 = spec["digests"]["locallyDerived"]["sha256"]
+    if actual_size != spec["size"] or actual_sha1 != expected_sha1 or actual_sha256 != expected_sha256:
         raise RuntimeError(
             f"upstream verification failed for {path.name}: "
-            f"size={actual_size}, sha256={actual_hash}"
+            f"size={actual_size}, sha1={actual_sha1}, sha256={actual_sha256}"
         )
 
 
@@ -100,6 +107,7 @@ def copy_item(source: Path, destination: Path) -> None:
 
 
 def write_windows_launcher(path: Path) -> None:
+    """Write an optional CLI launcher; API consumers may invoke the binary with NSISDIR."""
     path.write_text(
         "@echo off\r\nsetlocal\r\n"
         'set "NSISDIR=%~dp0..\\..\\common"\r\n'
@@ -110,6 +118,7 @@ def write_windows_launcher(path: Path) -> None:
 
 
 def unix_launcher() -> str:
+    """Return an optional CLI launcher that resolves common/ after relocation."""
     return """#!/bin/sh
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -186,11 +195,19 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
     for required in (stage / "common" / "Include", stage / "common" / "Plugins", stage / "common" / "Stubs"):
         if not required.is_dir() or not any(required.rglob("*")):
             raise RuntimeError(f"missing or empty required common directory: {required}")
+    forbidden_roots = {"scripts", "tests", ".github", "config", "fixtures"}
+    for staged_file in (p for p in stage.rglob("*") if p.is_file()):
+        relative = staged_file.relative_to(stage)
+        if relative.suffix.lower() == ".py" or relative.parts[0] in forbidden_roots:
+            raise RuntimeError(f"repository build/test file leaked into toolset: {relative.as_posix()}")
     hosts = []
     for rid, spec in config["hosts"].items():
-        for key in ("entryPoint", "binary"):
+        for key in ("binary", "convenienceLauncher"):
             if not (stage / spec[key]).is_file():
                 raise RuntimeError(f"missing {rid} {key}: {spec[key]}")
+        nsisdir = spec.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath")
+        if nsisdir != "common":
+            raise RuntimeError(f"{rid} must declare NSISDIR as toolset-relative common")
         runtime_files = sorted(
             p.relative_to(stage).as_posix()
             for p in (stage / "hosts" / spec["directory"]).rglob("*") if p.is_file()
@@ -207,8 +224,8 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
         hosts.append({"rid": rid, **spec, "runtimeFiles": runtime_files})
     executable_paths = {
         spec[key]
-        for spec in config["hosts"].values() if spec["executable"]
-        for key in ("entryPoint", "binary")
+        for spec in config["hosts"].values() if spec["unixExecutable"]
+        for key in ("convenienceLauncher", "binary")
     }
     files = [
         file_record(stage, p, p.relative_to(stage).as_posix() in executable_paths)
@@ -223,6 +240,7 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
         "commonRoot": "common",
         "hosts": hosts,
         "files": files,
+        "invocationPolicy": "Resolve the selected host binary and requiredEnvironment paths against the toolset root. Convenience launchers are optional shell-oriented helpers.",
         "executablePermissionPolicy": "After ZIP extraction, chmod every file whose requiresExecutable is true to its unixMode before executing it.",
     }
     if provenance is not None:
@@ -246,8 +264,12 @@ def verify_manifest(stage: Path, repair_modes: bool = False) -> dict:
         if repair_modes and record["requiresExecutable"]:
             file_path.chmod(int(record["unixMode"], 8))
     for host in manifest["hosts"]:
-        if host["rid"] != "win-x64" and not host["entryPoint"].startswith(f"hosts/{host['directory']}/"):
-            raise RuntimeError(f"invalid entry point layout for {host['rid']}")
+        if not host["binary"].startswith(f"hosts/{host['directory']}/"):
+            raise RuntimeError(f"invalid binary layout for {host['rid']}")
+        if not host["convenienceLauncher"].startswith(f"hosts/{host['directory']}/"):
+            raise RuntimeError(f"invalid launcher layout for {host['rid']}")
+        if host.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath") != "common":
+            raise RuntimeError(f"invalid NSISDIR contract for {host['rid']}")
     print(f"verified {len(actual)} files for {manifest['toolsetVersion']}")
     return manifest
 
