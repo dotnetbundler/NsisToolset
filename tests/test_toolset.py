@@ -1,6 +1,8 @@
 import json
+import io
 import os
 import stat
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -9,6 +11,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import toolset
+import ci as ci_script
 
 
 class ToolsetTests(unittest.TestCase):
@@ -143,6 +146,26 @@ class ToolsetTests(unittest.TestCase):
                 bundle.writestr("../escape", b"bad")
             with self.assertRaises(RuntimeError):
                 toolset.safe_extract_zip_flat(archive, Path(temporary) / "out")
+
+    def test_source_archive_extraction_requires_one_safe_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar.bz2"
+            with tarfile.open(archive, "w:bz2") as bundle:
+                content = b"source"
+                item = tarfile.TarInfo("nsis-3.12/file.txt")
+                item.size = len(content)
+                bundle.addfile(item, io.BytesIO(content))
+            source = ci_script.safe_extract_source(archive, root / "out")
+            self.assertEqual(b"source", (source / "file.txt").read_bytes())
+
+            unsafe = root / "unsafe.tar.bz2"
+            with tarfile.open(unsafe, "w:bz2") as bundle:
+                item = tarfile.TarInfo("../escape")
+                item.size = 1
+                bundle.addfile(item, io.BytesIO(b"x"))
+            with self.assertRaises(RuntimeError):
+                ci_script.safe_extract_source(unsafe, root / "unsafe-out")
 
     def test_upstream_check_requires_published_sha1_and_derived_sha256(self):
         with tempfile.TemporaryDirectory() as temporary:

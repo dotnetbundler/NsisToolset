@@ -43,7 +43,8 @@ CI 使用真正的 Ubuntu 24.04 x64/arm64、macOS 15 Intel/Apple Silicon 和 Win
 
 ## 仓库中的 Python 文件
 
-- `scripts/toolset.py`：下载并校验上游输入、组装宿主、生成和验证 Manifest、创建确定性 ZIP。
+- `scripts/ci.py`：集中编排跨平台 CI 的原生构建、冒烟测试、组装、安装卸载测试和发布。
+- `scripts/toolset.py`：提供下载、校验、暂存、Manifest 和确定性打包等底层操作。
 - `scripts/host_metadata.py`：记录原生编译器、runner、工具链、依赖和构建参数。
 - `scripts/provenance.py`：把各宿主记录与 GitHub Actions provenance 汇总。
 - `scripts/register-upstream.cmd` 与 `scripts/register-upstream.sh`：无需语言运行时，在本地登记上游校验信息。
@@ -57,9 +58,13 @@ Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线
 
 ```powershell
 python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage stage --work artifacts/work
+python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
+
+所有生成的构建数据统一放在 `artifacts/`。`artifacts/stage` 是等待打包的
+完整目录树；它还没有发布，也不是最终压缩包，因此保留 `stage` 名称比
+`release` 更准确。可以发布的文件写入 `artifacts/dist`。
 
 完整原生构建放在 CI 中，避免用 Windows 交叉环境冒充 macOS。完整参数、输入哈希和“无补丁”记录见 [SOURCES.md](SOURCES.md)。
 

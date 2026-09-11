@@ -68,22 +68,11 @@ jobs:
           name: verified-upstream
           path: artifacts/upstream
       - name: Stage common files and official x86 Windows compiler
-        shell: pwsh
-        run: |
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-windows --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --stage stage --work artifacts/work
-          $env:NSISDIR = (Resolve-Path stage/common).Path
-          if ((& stage/hosts/win-x86/makensis.exe -VERSION) -ne 'v${{ needs.resolve.outputs.upstream-version }}') { throw 'Unexpected Windows compiler version' }
-          if ((& stage/makensis.cmd -VERSION) -ne 'v${{ needs.resolve.outputs.upstream-version }}') { throw 'Root Windows dispatcher failed' }
-          New-Item -ItemType Directory artifacts/smoke | Out-Null
-          Copy-Item fixtures/minimal.nsi artifacts/smoke/
-          Push-Location artifacts/smoke
-          & ../../stage/hosts/win-x86/makensis.exe minimal.nsi
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path smoke-installer.exe)) { throw 'Windows compiler smoke test failed' }
-          Pop-Location
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" windows-stage-smoke --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work --fixture fixtures/minimal.nsi --smoke artifacts/smoke
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-stage
-          path: stage
+          path: artifacts/stage
           if-no-files-found: error
           retention-days: 2
       - uses: actions/upload-artifact@v7.0.1
@@ -117,21 +106,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential file libc6-dev zlib1g-dev
       - run: python -m pip install --require-hashes -r requirements-build.txt
       - name: Build twice and require identical compiler bytes
-        run: |
-          bash scripts/build-posix.sh "artifacts/upstream/${{ needs.resolve.outputs.source-archive }}" artifacts/native-1 '${{ matrix.rid }}' '${{ needs.resolve.outputs.source-date-epoch }}' '${{ needs.resolve.outputs.upstream-version }}'
-          bash scripts/build-posix.sh "artifacts/upstream/${{ needs.resolve.outputs.source-archive }}" artifacts/native-2 '${{ matrix.rid }}' '${{ needs.resolve.outputs.source-date-epoch }}' '${{ needs.resolve.outputs.upstream-version }}'
-          cmp artifacts/native-1/makensis artifacts/native-2/makensis
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" native-build-twice --archive "artifacts/upstream/${{ needs.resolve.outputs.source-archive }}" --rid '${{ matrix.rid }}' --first artifacts/native-1 --second artifacts/native-2
       - name: Compile through both direct binary and root dispatcher
-        run: |
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-windows --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --stage artifacts/smoke-stage --work artifacts/extract
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-host --stage artifacts/smoke-stage --rid '${{ matrix.rid }}' --binary artifacts/native-1/makensis --metadata artifacts/native-1/build-metadata.json
-          mkdir -p artifacts/smoke
-          cp fixtures/minimal.nsi artifacts/smoke/
-          cd artifacts/smoke
-          export NSISDIR="$(cd ../smoke-stage/common && pwd)"
-          "../smoke-stage/hosts/${{ matrix.rid }}/makensis" minimal.nsi
-          "../smoke-stage/makensis" -VERSION | grep -Fx 'v${{ needs.resolve.outputs.upstream-version }}'
-          test -f smoke-installer.exe
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" native-smoke --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --rid '${{ matrix.rid }}' --binary artifacts/native-1/makensis --metadata artifacts/native-1/build-metadata.json --stage artifacts/smoke-stage --work artifacts/extract --fixture fixtures/minimal.nsi --smoke artifacts/smoke
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: host-${{ matrix.rid }}
@@ -156,41 +133,20 @@ jobs:
       - uses: actions/download-artifact@v8.0.1
         with:
           name: windows-stage
-          path: stage
+          path: artifacts/stage
       - uses: actions/download-artifact@v8.0.1
         with:
           pattern: host-*
           path: artifacts/hosts
       - name: Assemble deterministic ZIP and external provenance
-        run: |
-          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64; do
-            python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-host --stage stage --rid "$rid" --binary "artifacts/hosts/host-$rid/makensis" --metadata "artifacts/hosts/host-$rid/build-metadata.json"
-          done
-          python scripts/provenance.py --metadata-root artifacts/hosts --upstream-version "${{ needs.resolve.outputs.upstream-version }}" --output artifacts/build-provenance.json
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" build-record --stage stage --source-commit "$GITHUB_SHA"
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" source-record --output stage/SOURCE-RECORD.md
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" manifest --stage stage
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" verify --stage stage --repair-modes
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" package --stage stage --dist dist
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" package --stage stage --dist artifacts/repeat
-          cmp "dist/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip" "artifacts/repeat/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip"
-          cp artifacts/build-provenance.json dist/build-provenance.json
-          cp stage/SOURCE-RECORD.md dist/source-record.md
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts --source-commit "$GITHUB_SHA"
       - name: Verify relocated ZIP
-        run: |
-          python scripts/toolset.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" verify-zip --archive "dist/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip" --destination "artifacts/relocated toolset"
-          mkdir -p "artifacts/relocated smoke"
-          cp fixtures/minimal.nsi "artifacts/relocated smoke/"
-          cd "artifacts/relocated smoke"
-          export NSISDIR="$(cd '../relocated toolset/common' && pwd)"
-          "../relocated toolset/hosts/linux-x64/makensis" minimal.nsi
-          "../relocated toolset/makensis" -VERSION | grep -Fx 'v${{ needs.resolve.outputs.upstream-version }}'
-          test -f smoke-installer.exe
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" relocated-smoke --archive "artifacts/dist/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip" --destination "artifacts/relocated toolset" --smoke "artifacts/relocated smoke" --fixture fixtures/minimal.nsi
       - run: python -m unittest discover -s tests -v
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-assets
-          path: dist
+          path: artifacts/dist
           if-no-files-found: error
           retention-days: 14
 
@@ -198,26 +154,16 @@ jobs:
     needs: [assemble, windows-common, native-hosts]
     runs-on: windows-2022
     steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v8.0.1
         with:
           pattern: installer-*
-          path: installers
+          path: artifacts/installers
       - name: Run every host-generated installer and uninstaller
-        shell: pwsh
-        run: |
-          $installers = Get-ChildItem installers -Recurse -Filter smoke-installer.exe
-          if ($installers.Count -ne 5) { throw "Expected 5 installers, found $($installers.Count)" }
-          foreach ($installer in $installers) {
-            Remove-Item "$env:TEMP/NsisToolsetSmoke" -Recurse -Force -ErrorAction SilentlyContinue
-            $process = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
-            if ($process.ExitCode -ne 0 -or -not (Test-Path "$env:TEMP/NsisToolsetSmoke/installed.txt")) { throw "Install failed: $($installer.FullName)" }
-            $uninstaller = "$env:TEMP/NsisToolsetSmoke/uninstall.exe"
-            $process = Start-Process $uninstaller -ArgumentList '/S' -Wait -PassThru
-            if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($installer.FullName)" }
-            $deadline = (Get-Date).AddSeconds(10)
-            while ((Test-Path "$env:TEMP/NsisToolsetSmoke") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
-            if (Test-Path "$env:TEMP/NsisToolsetSmoke") { throw "Uninstall left files: $($installer.FullName)" }
-          }
+        run: python scripts/ci.py install-uninstall --installers artifacts/installers --expected-count 5
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -227,13 +173,14 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v8.0.1
         with:
           name: release-assets
-          path: dist
+          path: artifacts/dist
       - name: Publish immutable versioned assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          test "$GITHUB_REF_NAME" = "v${{ needs.resolve.outputs.toolset-version }}"
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "NSIS Toolset ${{ needs.resolve.outputs.toolset-version }}" --notes "Audited cross-host NSIS ${{ needs.resolve.outputs.upstream-version }} toolset. See source-record.md and build-provenance.json."
+        run: python scripts/ci.py --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" publish --dist artifacts/dist
