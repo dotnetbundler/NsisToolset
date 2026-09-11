@@ -2,16 +2,14 @@ import io
 import json
 import os
 import stat
-import sys
 import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import native_build
-import toolset_operations as toolset
+from scripts import native_build
+from scripts import toolset_operations as toolset
 
 
 class ToolsetTests(unittest.TestCase):

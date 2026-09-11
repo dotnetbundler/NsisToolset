@@ -6,8 +6,8 @@ import os
 import shutil
 from pathlib import Path
 
-import toolset_operations as toolset
-from ci_support import recreate, require_version, run
+from . import toolset_operations as toolset
+from .ci_support import recreate, require_version, run
 
 
 def windows_stage_and_smoke(

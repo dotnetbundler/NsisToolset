@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import toolset_operations as toolset
+from . import toolset_operations as toolset
 
 
 class Arguments(argparse.Namespace):

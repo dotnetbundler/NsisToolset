@@ -9,8 +9,8 @@ import tempfile
 import time
 from pathlib import Path
 
-import toolset_operations as toolset
-from ci_support import recreate, run
+from . import toolset_operations as toolset
+from .ci_support import recreate, run
 
 
 def write_provenance(metadata_root: Path, upstream_version: str, output: Path) -> dict:

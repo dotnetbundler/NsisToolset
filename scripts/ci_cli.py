@@ -9,10 +9,8 @@ import sys
 import tarfile
 from pathlib import Path
 
-import native_build
-import release_tasks
-import smoke_tests
-import toolset_operations as toolset
+from . import native_build, release_tasks, smoke_tests
+from . import toolset_operations as toolset
 
 
 class Arguments(argparse.Namespace):

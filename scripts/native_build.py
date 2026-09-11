@@ -13,8 +13,8 @@ import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 
-import toolset_operations as toolset
-from ci_support import recreate, run
+from . import toolset_operations as toolset
+from .ci_support import recreate, run
 
 
 def read_text(path: Path) -> str:

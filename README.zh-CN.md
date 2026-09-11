@@ -58,8 +58,8 @@ Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线
 本地可完成、不需要全部原生系统的检查：
 
 ```powershell
-python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
+python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
