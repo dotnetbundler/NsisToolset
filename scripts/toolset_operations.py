@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Auditable assembly and verification for the NSIS cross-host toolset."""
+"""Reusable download, staging, manifest, and packaging operations."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import stat
-import subprocess
-import sys
 import time
 import urllib.request
 import zipfile
@@ -21,28 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "toolset.json"
 DEFAULT_UPSTREAM_DIR = ROOT / "config" / "upstream"
 COMMON_ITEMS = ("Contrib", "Include", "Plugins", "Stubs", "nsisconf.nsh", "COPYING")
-
-
-class Arguments(argparse.Namespace):
-    config: Path
-    upstream_config: Path | None
-    toolset_version: str | None
-    command: str
-    version: str
-    upstream_dir: Path
-    github_output: Path | None
-    cache: Path
-    archive: Path
-    stage: Path
-    work: Path
-    rid: str
-    binary: Path
-    metadata: Path | None
-    source_commit: str
-    output: Path
-    repair_modes: bool
-    dist: Path
-    destination: Path
 
 
 def load_config(path: Path) -> dict:
@@ -57,10 +31,9 @@ def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) ->
     prefix = f"{upstream['upstreamVersion']}-"
     if not toolset_version.startswith(prefix):
         raise RuntimeError(
-            f"toolset version {toolset_version} does not use upstream "
-            f"{upstream['upstreamVersion']}"
+            f"toolset version {toolset_version} does not use upstream {upstream['upstreamVersion']}"
         )
-    local_version = toolset_version[len(prefix):]
+    local_version = toolset_version[len(prefix) :]
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.-]*", local_version):
         raise RuntimeError(f"invalid local version label: {local_version}")
     config = {**base, **upstream, "toolsetVersion": toolset_version}
@@ -69,7 +42,9 @@ def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) ->
 
 def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> dict[str, str]:
     if not re.fullmatch(r"v[0-9][0-9A-Za-z.-]*-[0-9A-Za-z][0-9A-Za-z.-]*", version):
-        raise RuntimeError("version must have form v<upstream>-<local>, for example v3.12-r1 or v3.12-preview.2")
+        raise RuntimeError(
+            "version must have form v<upstream>-<local>, for example v3.12-r1 or v3.12-preview.2"
+        )
     candidates = []
     for path in upstream_dir.glob("*.json"):
         upstream_version = path.stem
@@ -79,7 +54,7 @@ def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> 
     if not candidates:
         raise RuntimeError(f"no registered upstream config matches {version}")
     _, upstream_version, path = max(candidates)
-    local_version = version[len(upstream_version) + 2:]
+    local_version = version[len(upstream_version) + 2 :]
     upstream = load_config(path)
     if upstream.get("upstreamVersion") != upstream_version:
         raise RuntimeError(f"upstream config filename/version mismatch: {path}")
@@ -119,7 +94,11 @@ def checked_file(path: Path, spec: dict) -> None:
     actual_sha256 = sha256(path)
     expected_sha1 = spec["digests"]["upstreamPublished"]["sha1"]
     expected_sha256 = spec["digests"]["locallyDerived"]["sha256"]
-    if actual_size != spec["size"] or actual_sha1 != expected_sha1 or actual_sha256 != expected_sha256:
+    if (
+        actual_size != spec["size"]
+        or actual_sha1 != expected_sha1
+        or actual_sha256 != expected_sha256
+    ):
         raise RuntimeError(
             f"upstream verification failed for {path.name}: "
             f"size={actual_size}, sha1={actual_sha1}, sha256={actual_sha256}"
@@ -138,11 +117,16 @@ def download(config: dict, cache: Path) -> None:
             except RuntimeError:
                 destination.unlink()
         temporary = destination.with_suffix(destination.suffix + ".partial")
-        request = urllib.request.Request(spec["url"], headers={"User-Agent": "NsisToolset reproducible builder"})
+        request = urllib.request.Request(
+            spec["url"], headers={"User-Agent": "NsisToolset reproducible builder"}
+        )
         last_error: Exception | None = None
         for attempt in range(1, 4):
             try:
-                with urllib.request.urlopen(request, timeout=90) as response, temporary.open("wb") as output:
+                with (
+                    urllib.request.urlopen(request, timeout=90) as response,
+                    temporary.open("wb") as output,
+                ):
                     shutil.copyfileobj(response, output)
                 checked_file(temporary, spec)
                 temporary.replace(destination)
@@ -220,9 +204,9 @@ def verify_windows_x86(binary: Path) -> None:
     if data[:2] != b"MZ" or len(data) < 0x40:
         raise RuntimeError("official Windows compiler is not a PE executable")
     pe_offset = int.from_bytes(data[0x3C:0x40], "little")
-    if data[pe_offset:pe_offset + 4] != b"PE\0\0":
+    if data[pe_offset : pe_offset + 4] != b"PE\0\0":
         raise RuntimeError("official Windows compiler has an invalid PE header")
-    machine = int.from_bytes(data[pe_offset + 4:pe_offset + 6], "little")
+    machine = int.from_bytes(data[pe_offset + 4 : pe_offset + 6], "little")
     if machine != 0x014C:
         raise RuntimeError(f"official Windows compiler is not x86 (PE machine 0x{machine:04x})")
 
@@ -291,14 +275,20 @@ def file_record(stage: Path, path: Path, requires_executable: bool = False) -> d
 
 
 def generate_manifest(config: dict, stage: Path) -> dict:
-    for required in (stage / "common" / "Include", stage / "common" / "Plugins", stage / "common" / "Stubs"):
+    for required in (
+        stage / "common" / "Include",
+        stage / "common" / "Plugins",
+        stage / "common" / "Stubs",
+    ):
         if not required.is_dir() or not any(required.rglob("*")):
             raise RuntimeError(f"missing or empty required common directory: {required}")
     forbidden_roots = {"scripts", "tests", ".github", "config", "fixtures"}
     for staged_file in (p for p in stage.rglob("*") if p.is_file()):
         relative = staged_file.relative_to(stage)
         if relative.suffix.lower() == ".py" or relative.parts[0] in forbidden_roots:
-            raise RuntimeError(f"repository build/test file leaked into toolset: {relative.as_posix()}")
+            raise RuntimeError(
+                f"repository build/test file leaked into toolset: {relative.as_posix()}"
+            )
     hosts = []
     for rid, spec in config["hosts"].items():
         if not (stage / spec["binary"]).is_file():
@@ -308,7 +298,8 @@ def generate_manifest(config: dict, stage: Path) -> dict:
             raise RuntimeError(f"{rid} must declare NSISDIR as toolset-relative common")
         runtime_files = sorted(
             p.relative_to(stage).as_posix()
-            for p in (stage / "hosts" / spec["directory"]).rglob("*") if p.is_file()
+            for p in (stage / "hosts" / spec["directory"]).rglob("*")
+            if p.is_file()
         )
         hosts.append({"rid": rid, **spec, "runtimeFiles": runtime_files})
     for launcher in config["launchers"].values():
@@ -319,7 +310,8 @@ def generate_manifest(config: dict, stage: Path) -> dict:
     } | {config["launchers"]["posix"]}
     files = [
         file_record(stage, p, p.relative_to(stage).as_posix() in executable_paths)
-        for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "toolset-manifest.json"
+        for p in sorted(stage.rglob("*"))
+        if p.is_file() and p.name != "toolset-manifest.json"
     ]
     manifest = {
         "schemaVersion": 1,
@@ -335,7 +327,9 @@ def generate_manifest(config: dict, stage: Path) -> dict:
         "executablePermissionPolicy": "After ZIP extraction, chmod every file whose requiresExecutable is true to its unixMode before executing it.",
     }
     target = stage / "toolset-manifest.json"
-    target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    target.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
     return manifest
 
 
@@ -343,9 +337,13 @@ def verify_manifest(stage: Path, repair_modes: bool = False) -> dict:
     path = stage / "toolset-manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
     declared = {record["path"] for record in manifest["files"]}
-    actual = {p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file() and p != path}
+    actual = {
+        p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file() and p != path
+    }
     if actual != declared:
-        raise RuntimeError(f"manifest file set mismatch; missing={sorted(declared-actual)}, extra={sorted(actual-declared)}")
+        raise RuntimeError(
+            f"manifest file set mismatch; missing={sorted(declared - actual)}, extra={sorted(actual - declared)}"
+        )
     for record in manifest["files"]:
         file_path = stage / PurePosixPath(record["path"])
         if file_path.stat().st_size != record["size"] or sha256(file_path) != record["sha256"]:
@@ -355,7 +353,10 @@ def verify_manifest(stage: Path, repair_modes: bool = False) -> dict:
     for host in manifest["hosts"]:
         if not host["binary"].startswith(f"hosts/{host['directory']}/"):
             raise RuntimeError(f"invalid binary layout for {host['rid']}")
-        if host.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath") != "common":
+        if (
+            host.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath")
+            != "common"
+        ):
             raise RuntimeError(f"invalid NSISDIR contract for {host['rid']}")
     if manifest.get("launchers") != {"windows": "makensis.cmd", "posix": "makensis"}:
         raise RuntimeError("invalid root launcher contract")
@@ -370,7 +371,9 @@ def deterministic_zip(stage: Path, destination: Path, epoch: int) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     modes = {record["path"]: int(record["unixMode"], 8) for record in manifest["files"]}
     modes["toolset-manifest.json"] = 0o644
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
+    with zipfile.ZipFile(
+        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as bundle:
         for path in sorted(p for p in stage.rglob("*") if p.is_file()):
             relative = path.relative_to(stage).as_posix()
             info = zipfile.ZipInfo(relative, timestamp)
@@ -407,7 +410,9 @@ def write_build_record(config: dict, stage: Path, source_commit: str) -> dict:
         },
     }
     target = stage / "build-record.json"
-    target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    target.write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
     return record
 
 
@@ -422,9 +427,9 @@ def write_source_record(config: dict, target: Path) -> None:
         )
     text = f"""# Source record
 
-Toolset version: `{config['toolsetVersion']}`
-Upstream NSIS version: `{config['upstreamVersion']}`
-`SOURCE_DATE_EPOCH`: `{config['sourceDateEpoch']}`
+Toolset version: `{config["toolsetVersion"]}`
+Upstream NSIS version: `{config["upstreamVersion"]}`
+`SOURCE_DATE_EPOCH`: `{config["sourceDateEpoch"]}`
 
 | Input | Official URL | Bytes | Upstream SHA-1 | Upstream MD5 | Locally derived SHA-256 |
 | --- | --- | ---: | --- | --- | --- |
@@ -453,86 +458,3 @@ def safe_extract_zip_flat(archive: Path, destination: Path) -> None:
             if relative.is_absolute() or ".." in relative.parts:
                 raise RuntimeError(f"unsafe ZIP member: {item.filename}")
         bundle.extractall(destination)
-
-
-def resolve_version_command(version: str, upstream_dir: Path, github_output: Path | None) -> None:
-    resolved = resolve_version(version, upstream_dir)
-    print(json.dumps(resolved, indent=2, sort_keys=True))
-    if github_output is not None:
-        with github_output.open("a", encoding="utf-8", newline="\n") as output:
-            for key, value in resolved.items():
-                output.write(f"{key}={value}\n")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--upstream-config", type=Path)
-    parser.add_argument("--toolset-version")
-    commands = parser.add_subparsers(dest="command", required=True)
-    # Subcommand: resolve-version
-    p = commands.add_parser("resolve-version")
-    p.add_argument("--version", required=True)
-    p.add_argument("--upstream-dir", type=Path, default=DEFAULT_UPSTREAM_DIR)
-    p.add_argument("--github-output", type=Path)
-    # Subcommand: download
-    p = commands.add_parser("download")
-    p.add_argument("--cache", type=Path, required=True)
-    # Subcommand: stage-windows
-    p = commands.add_parser("stage-windows")
-    p.add_argument("--archive", type=Path, required=True)
-    p.add_argument("--stage", type=Path, required=True)
-    p.add_argument("--work", type=Path, required=True)
-    # Subcommand: stage-host
-    p = commands.add_parser("stage-host")
-    p.add_argument("--stage", type=Path, required=True)
-    p.add_argument("--rid", required=True)
-    p.add_argument("--binary", type=Path, required=True)
-    p.add_argument("--metadata", type=Path)
-    # Subcommand: build-record
-    p = commands.add_parser("build-record")
-    p.add_argument("--stage", type=Path, required=True)
-    p.add_argument("--source-commit", required=True)
-    # Subcommand: source-record
-    p = commands.add_parser("source-record")
-    p.add_argument("--output", type=Path, required=True)
-    # Subcommand: manifest
-    p = commands.add_parser("manifest")
-    p.add_argument("--stage", type=Path, required=True)
-    # Subcommand: verify
-    p = commands.add_parser("verify")
-    p.add_argument("--stage", type=Path, required=True)
-    p.add_argument("--repair-modes", action="store_true")
-    # Subcommand: package
-    p = commands.add_parser("package")
-    p.add_argument("--stage", type=Path, required=True)
-    p.add_argument("--dist", type=Path, required=True)
-    # Subcommand: verify-zip
-    p = commands.add_parser("verify-zip")
-    p.add_argument("--archive", type=Path, required=True)
-    p.add_argument("--destination", type=Path, required=True)
-    args = parser.parse_args(namespace=Arguments())
-
-    # resolve-version subcommand
-    if args.command == "resolve-version": return resolve_version_command(args.version, args.upstream_dir, args.github_output)
-    # Validate required arguments for other subcommands
-    if not args.upstream_config or not args.toolset_version: parser.error("--upstream-config and --toolset-version are required")
-    config = merged_config(args.config, args.upstream_config, args.toolset_version)
-    # Dispatch subcommands
-    if args.command == "download": download(config, args.cache)
-    elif args.command == "stage-windows": stage_windows(config, args.archive, args.stage, args.work)
-    elif args.command == "stage-host": stage_host(config, args.stage, args.rid, args.binary, args.metadata)
-    elif args.command == "build-record": write_build_record(config, args.stage, args.source_commit)
-    elif args.command == "source-record": write_source_record(config, args.output)
-    elif args.command == "manifest": generate_manifest(config, args.stage)
-    elif args.command == "verify": verify_manifest(args.stage, args.repair_modes)
-    elif args.command == "package": package(config, args.stage, args.dist)
-    elif args.command == "verify-zip": verify_zip(args.archive, args.destination)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        raise SystemExit(1)

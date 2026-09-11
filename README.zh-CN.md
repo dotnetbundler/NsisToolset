@@ -43,10 +43,11 @@ CI 使用真正的 Ubuntu 24.04 x64/arm64、macOS 15 Intel/Apple Silicon 和 Win
 
 ## 仓库中的 Python 文件
 
-- `scripts/ci.py`：集中编排跨平台 CI 的原生构建、冒烟测试、组装、安装卸载测试和发布。
-- `scripts/toolset.py`：提供下载、校验、暂存、Manifest 和确定性打包等底层操作。
-- `scripts/host_metadata.py`：记录原生编译器、runner、工具链、依赖和构建参数。
-- `scripts/provenance.py`：把各宿主记录与 GitHub Actions provenance 汇总。
+- `scripts/toolset_operations.py`：提供可复用的下载、暂存、Manifest 和打包操作。
+- `scripts/toolset_cli.py`：把工具集操作暴露为本地和 CI 命令。
+- `scripts/ci_cli.py`：分派 CI 专用任务。
+- `scripts/native_build.py`、`scripts/smoke_tests.py` 和 `scripts/release_tasks.py`：分别负责原生构建、冒烟测试和发布流程。
+- `scripts/ci_support.py`：提供共用的进程和文件系统辅助函数。
 - `scripts/register-upstream.cmd` 与 `scripts/register-upstream.sh`：无需语言运行时，在本地登记上游校验信息。
 - `tests/test_toolset.py`：测试完整性失败、确定性打包、路径安全、权限元数据和宿主调用契约。
 
@@ -57,14 +58,22 @@ Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线
 本地可完成、不需要全部原生系统的检查：
 
 ```powershell
-python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
+python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
 所有生成的构建数据统一放在 `artifacts/`。`artifacts/stage` 是等待打包的
 完整目录树；它还没有发布，也不是最终压缩包，因此保留 `stage` 名称比
 `release` 更准确。可以发布的文件写入 `artifacts/dist`。
+
+Python 格式化和基础检查规则统一定义在 `pyproject.toml`：
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check scripts tests
+python -m ruff format --check scripts tests
+```
 
 完整原生构建放在 CI 中，避免用 Windows 交叉环境冒充 macOS。完整参数、输入哈希和“无补丁”记录见 [SOURCES.md](SOURCES.md)。
 

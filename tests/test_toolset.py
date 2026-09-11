@@ -1,17 +1,17 @@
-import json
 import io
+import json
 import os
 import stat
+import sys
 import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import toolset
-import ci as ci_script
+import native_build
+import toolset_operations as toolset
 
 
 class ToolsetTests(unittest.TestCase):
@@ -79,7 +79,9 @@ class ToolsetTests(unittest.TestCase):
             self.assertTrue(executable["requiresExecutable"])
             with zipfile.ZipFile(first) as bundle:
                 self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
-                self.assertFalse(any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
+                self.assertFalse(
+                    any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist())
+                )
             if os.name != "nt":
                 self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
 
@@ -99,14 +101,18 @@ class ToolsetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             configs = Path(temporary)
             for version in ("3.12", "3.12-preview"):
-                (configs / (version + ".json")).write_text(json.dumps({
-                    "upstreamVersion": version,
-                    "sourceDateEpoch": 1,
-                    "upstream": {
-                        "windowsZip": {"fileName": "win.zip"},
-                        "sourceArchive": {"fileName": "src.tar"},
-                    },
-                }))
+                (configs / (version + ".json")).write_text(
+                    json.dumps(
+                        {
+                            "upstreamVersion": version,
+                            "sourceDateEpoch": 1,
+                            "upstream": {
+                                "windowsZip": {"fileName": "win.zip"},
+                                "sourceArchive": {"fileName": "src.tar"},
+                            },
+                        }
+                    )
+                )
             resolved = toolset.resolve_version("v3.12-preview-r1", configs)
             self.assertEqual("3.12-preview", resolved["upstreamVersion"])
             self.assertEqual("r1", resolved["localVersion"])
@@ -157,7 +163,7 @@ class ToolsetTests(unittest.TestCase):
                 item = tarfile.TarInfo("nsis-3.12/file.txt")
                 item.size = len(content)
                 bundle.addfile(item, io.BytesIO(content))
-            source = ci_script.safe_extract_source(archive, root / "out")
+            source = native_build.safe_extract_source(archive, root / "out")
             self.assertEqual(b"source", (source / "file.txt").read_bytes())
 
             unsafe = root / "unsafe.tar.bz2"
@@ -166,7 +172,7 @@ class ToolsetTests(unittest.TestCase):
                 item.size = 1
                 bundle.addfile(item, io.BytesIO(b"x"))
             with self.assertRaises(RuntimeError):
-                ci_script.safe_extract_source(unsafe, root / "unsafe-out")
+                native_build.safe_extract_source(unsafe, root / "unsafe-out")
 
     def test_upstream_check_requires_published_sha1_and_derived_sha256(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -175,7 +181,10 @@ class ToolsetTests(unittest.TestCase):
             spec = {
                 "size": path.stat().st_size,
                 "digests": {
-                    "upstreamPublished": {"sha1": toolset.digest(path, "sha1"), "md5": "record-only"},
+                    "upstreamPublished": {
+                        "sha1": toolset.digest(path, "sha1"),
+                        "md5": "record-only",
+                    },
                     "locallyDerived": {"sha256": toolset.sha256(path)},
                 },
             }

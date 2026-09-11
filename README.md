@@ -43,10 +43,11 @@ Each native compiler is built twice on the same runner and the bytes must match.
 
 ## Python files in this repository
 
-- `scripts/ci.py` owns cross-platform CI orchestration: native builds, smoke tests, assembly, installer tests, and publishing.
-- `scripts/toolset.py` provides the underlying download, verification, staging, manifest, and deterministic packaging operations.
-- `scripts/host_metadata.py` records native compiler, runner, toolchain, dependency, and build facts.
-- `scripts/provenance.py` combines per-host facts with GitHub Actions provenance.
+- `scripts/toolset_operations.py` provides reusable download, staging, manifest, and packaging operations.
+- `scripts/toolset_cli.py` exposes those operations as local and CI commands.
+- `scripts/ci_cli.py` dispatches CI-specific tasks.
+- `scripts/native_build.py`, `scripts/smoke_tests.py`, and `scripts/release_tasks.py` contain native build, smoke-test, and release responsibilities respectively.
+- `scripts/ci_support.py` contains shared process and filesystem helpers.
 - `scripts/register-upstream.cmd` and `scripts/register-upstream.sh` register upstream checksums locally without a language runtime.
 - `tests/test_toolset.py` tests integrity failures, deterministic packaging, path safety, permission metadata, and the host invocation contract.
 
@@ -57,8 +58,8 @@ Linux uses a static userspace binary and checks its GNU ABI note (kernel 3.2 for
 Local checks that do not require all native operating systems:
 
 ```powershell
-python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python scripts/toolset.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
+python scripts/toolset_cli.py --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
@@ -66,6 +67,14 @@ All generated build data lives under `artifacts/`. `artifacts/stage` is the
 assembled directory tree waiting to be packaged; it is deliberately called a
 stage rather than a release because it has not been published and is not the
 final archive. Publishable files are written to `artifacts/dist`.
+
+Python formatting and basic lint rules are defined in `pyproject.toml`:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check scripts tests
+python -m ruff format --check scripts tests
+```
 
 Native production builds belong in CI so an emulated or cross-compiled Windows environment cannot masquerade as macOS. Full arguments, input hashes, and the no-patch policy are in [SOURCES.md](SOURCES.md).
 
