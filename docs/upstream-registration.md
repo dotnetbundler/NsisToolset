@@ -21,6 +21,19 @@ Linux or macOS system shell:
 
     sh scripts/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
 
+Both scripts display seven progress steps. Downloaded archives are removed when
+the script finishes, including after an error. To retain them for inspection,
+add `--keep-downloads`. Without a directory, retained files are placed under
+`.cache/upstream/<version>`:
+
+    scripts\register-upstream.cmd 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads
+    sh scripts/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads
+
+An explicit directory can follow the option:
+
+    scripts\register-upstream.cmd 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads C:\temp\nsis-3.12
+    sh scripts/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads /tmp/nsis-3.12
+
 The scripts download the official Windows and source archives, require their
 published SHA-1 and MD5 to match, calculate SHA-256 and byte sizes locally, and
 write config/upstream/<version>.json. Existing configuration is never
