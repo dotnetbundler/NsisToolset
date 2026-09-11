@@ -293,6 +293,35 @@ class ToolsetTests(unittest.TestCase):
                 hashes.append(upstream.sha256(archive))
             self.assertNotEqual(hashes[0], hashes[1])
 
+    def test_assemble_creates_complete_reproducible_release_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary) / "artifacts"
+            stage, config = self.make_stage(artifacts)
+            hosts = artifacts / "hosts"
+            for rid in ("linux-x64", "linux-arm64", "osx-x64", "osx-arm64"):
+                staged_binary = stage / config["hosts"][rid]["binary"]
+                binary = hosts / f"host-{rid}" / "makensis"
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(staged_binary.read_bytes())
+                metadata = {"rid": rid, "reportedVersion": "vtest", "sha256": upstream.sha256(binary)}
+                (binary.parent / "build-metadata.json").write_text(json.dumps(metadata))
+                staged_binary.unlink()
+                staged_binary.parent.rmdir()
+            release_tasks.assemble(config, stage, hosts, artifacts, "source-commit")
+            dist = artifacts / "dist"
+            expected = {
+                "nsis-toolset-test-r1.zip",
+                "nsis-toolset-test-r1.zip.sha256",
+                "toolset-manifest.json",
+                "build-provenance.json",
+                "source-record.md",
+            }
+            self.assertEqual(expected, {path.name for path in dist.iterdir()})
+            with zipfile.ZipFile(dist / "nsis-toolset-test-r1.zip") as bundle:
+                self.assertIn("build-record.json", bundle.namelist())
+                self.assertIn("SOURCE-RECORD.md", bundle.namelist())
+            self.assertEqual((dist / "nsis-toolset-test-r1.zip").read_bytes(), (artifacts / "repeat/nsis-toolset-test-r1.zip").read_bytes())
+
     def test_tampering_is_detected(self):
         with tempfile.TemporaryDirectory() as temporary:
             stage = Path(temporary)
