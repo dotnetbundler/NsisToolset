@@ -8,8 +8,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from scripts import native_build
-from scripts import toolset_operations as toolset
+from build_tools import native_build
+from build_tools import toolset_operations as toolset
 
 
 class ToolsetTests(unittest.TestCase):

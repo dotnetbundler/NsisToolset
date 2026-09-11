@@ -43,12 +43,12 @@ CI 使用真正的 Ubuntu 24.04 x64/arm64、macOS 15 Intel/Apple Silicon 和 Win
 
 ## 仓库中的 Python 文件
 
-- `scripts/toolset_operations.py`：提供可复用的下载、暂存、Manifest 和打包操作。
-- `scripts/toolset_cli.py`：把工具集操作暴露为本地和 CI 命令。
-- `scripts/ci_cli.py`：分派 CI 专用任务。
-- `scripts/native_build.py`、`scripts/smoke_tests.py` 和 `scripts/release_tasks.py`：分别负责原生构建、冒烟测试和发布流程。
-- `scripts/ci_support.py`：提供共用的进程和文件系统辅助函数。
-- `scripts/register-upstream.cmd` 与 `scripts/register-upstream.sh`：无需语言运行时，在本地登记上游校验信息。
+- `build_tools/toolset_operations.py`：提供可复用的下载、暂存、Manifest 和打包操作。
+- `build_tools/toolset_cli.py`：把工具集操作暴露为本地和 CI 命令。
+- `build_tools/ci_cli.py`：分派 CI 专用任务。
+- `build_tools/native_build.py`、`build_tools/smoke_tests.py` 和 `build_tools/release_tasks.py`：分别负责原生构建、冒烟测试和发布流程。
+- `build_tools/ci_support.py`：提供共用的进程和文件系统辅助函数。
+- `tools/register-upstream.cmd` 与 `tools/register-upstream.sh`：无需语言运行时，在本地登记上游校验信息。
 - `tests/test_toolset.py`：测试完整性失败、确定性打包、路径安全、权限元数据和宿主调用契约。
 
 这些文件只用于下载、构建、组装、验证和测试，不会进入最终 NSIS toolset，也不是任何下游使用依赖。选择 Python 是因为同一套组装逻辑需要跨 Windows、Linux 和 macOS 运行，而且 NSIS 自身的 SCons 源码构建本来就需要 Python。
@@ -58,8 +58,8 @@ Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线
 本地可完成、不需要全部原生系统的检查：
 
 ```powershell
-python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
@@ -78,7 +78,7 @@ Actions 临时 artifact 只用于 job 间传递。消费者必须使用带版本
 ## 升级流程
 
 1. 选择明确的 NSIS 上游版本与新的包装修订号。
-2. Windows 运行 `scripts/register-upstream.cmd`，Linux/macOS 运行 `scripts/register-upstream.sh`，人工检查生成的 `config/upstream/<版本>.json`；不同本地标识复用同一文件。
+2. Windows 运行 `tools/register-upstream.cmd`，Linux/macOS 运行 `tools/register-upstream.sh`，人工检查生成的 `config/upstream/<版本>.json`；不同本地标识复用同一文件。
 3. 重新审计官方 ZIP 结构，尤其是真实 Windows 编译器与全部运行时依赖。
 4. 审查上游构建参数及 `Source/exehead/config.h` 的兼容约束；公共数据和原生编译器源码必须完全匹配。
 5. 跑完整原生矩阵、重复构建比较、重定位测试和全宿主 Windows 安装/卸载测试。

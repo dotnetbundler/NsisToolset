@@ -43,12 +43,12 @@ Each native compiler is built twice on the same runner and the bytes must match.
 
 ## Python files in this repository
 
-- `scripts/toolset_operations.py` provides reusable download, staging, manifest, and packaging operations.
-- `scripts/toolset_cli.py` exposes those operations as local and CI commands.
-- `scripts/ci_cli.py` dispatches CI-specific tasks.
-- `scripts/native_build.py`, `scripts/smoke_tests.py`, and `scripts/release_tasks.py` contain native build, smoke-test, and release responsibilities respectively.
-- `scripts/ci_support.py` contains shared process and filesystem helpers.
-- `scripts/register-upstream.cmd` and `scripts/register-upstream.sh` register upstream checksums locally without a language runtime.
+- `build_tools/toolset_operations.py` provides reusable download, staging, manifest, and packaging operations.
+- `build_tools/toolset_cli.py` exposes those operations as local and CI commands.
+- `build_tools/ci_cli.py` dispatches CI-specific tasks.
+- `build_tools/native_build.py`, `build_tools/smoke_tests.py`, and `build_tools/release_tasks.py` contain native build, smoke-test, and release responsibilities respectively.
+- `build_tools/ci_support.py` contains shared process and filesystem helpers.
+- `tools/register-upstream.cmd` and `tools/register-upstream.sh` register upstream checksums locally without a language runtime.
 - `tests/test_toolset.py` tests integrity failures, deterministic packaging, path safety, permission metadata, and the host invocation contract.
 
 These files are production automation only. They are not copied into the released NSIS toolset and are not downstream runtime dependencies. Python is used because the same assembly logic must run on Windows, Linux, and macOS, and NSIS's own SCons source build already requires Python.
@@ -58,8 +58,8 @@ Linux uses a static userspace binary and checks its GNU ABI note (kernel 3.2 for
 Local checks that do not require all native operating systems:
 
 ```powershell
-python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python -m scripts.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
@@ -85,7 +85,7 @@ GitHub Actions artifacts are retained only for job-to-job transport. Consumers m
 ## Upgrade procedure
 
 1. Select a concrete upstream NSIS release and a new packaging revision.
-2. Run `scripts/register-upstream.cmd` on Windows or `scripts/register-upstream.sh` on Linux/macOS, then review the generated `config/upstream/<version>.json`. Local labels reuse that file.
+2. Run `tools/register-upstream.cmd` on Windows or `tools/register-upstream.sh` on Linux/macOS, then review the generated `config/upstream/<version>.json`. Local labels reuse that file.
 3. Re-audit the standard ZIP layout, especially the real Windows compiler and all runtime dependencies.
 4. Review upstream build flags and the `Source/exehead/config.h` compatibility contract. Common data and native compiler sources must match exactly.
 5. Run the entire native matrix, reproducibility comparisons, relocation tests, and all-host Windows installation tests.
