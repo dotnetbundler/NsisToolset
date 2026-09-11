@@ -39,12 +39,15 @@ Manifest 为每个文件记录路径、SHA-256、大小、标准 Unix mode 和�
 
 CI 使用真正的 Ubuntu 24.04 x64/arm64、macOS 15 Intel/Apple Silicon 和 Windows Server 2022 runner。原生编译器从官方源码执行 `install-compiler`，跳过 stubs、plugins、utils、misc 和 docs；公共数据始终来自完全匹配的官方 Windows ZIP。
 
-每个原生编译器在同一 runner 构建两次并要求字节相同，随后检查动态选择的上游版本，通过真实二进制和根目录启动器分别编译最小 fixture。组装阶段检查完整文件集合、哈希、版本、权限策略、宿主元数据，并在含空格的新路径解压和运行。最终 Windows job 会逐一实际运行五个宿主生成的安装器，检查安装标记，运行卸载器并确认清理完成。
+每个原生编译器在同一 runner 构建两次并要求字节相同，随后检查动态选择的上游版本，并通过包根目录启动器编译最小 fixture。Windows job 接着逐一实际运行五个宿主生成的安装器，检查安装标记，运行卸载器并确认清理完成。只有该验收通过后，Ubuntu 才组装 Release，并检查完整文件集合、哈希、版本、权限策略、宿主元数据、两次打包的 ZIP 字节一致性，以及在含空格的新路径中的重定位运行。
 
 ## 仓库中的 Python 文件
 
-- `build_tools/toolset_operations.py`：提供可复用的下载、暂存、Manifest 和打包操作。
-- `build_tools/toolset_cli.py`：把工具集操作暴露为本地和 CI 命令。
+- `build_tools/configuration.py`：校验工具集版本，并合并基础配置与每个上游版本的配置。
+- `build_tools/upstream.py`：下载、校验并安全解压上游归档。
+- `build_tools/staging.py`：暂存公共数据、根启动器和宿主运行集。
+- `build_tools/packaging.py`：生成记录、Manifest 和可复现的 Release 归档。
+- `build_tools/toolset_cli.py`：暴露可复用的版本、下载和暂存命令。
 - `build_tools/ci_cli.py`：分派 CI 专用任务。
 - `build_tools/native_build.py`、`build_tools/smoke_tests.py` 和 `build_tools/release_tasks.py`：分别负责原生构建、冒烟测试和发布流程。
 - `build_tools/ci_support.py`：提供共用的进程和文件系统辅助函数。
@@ -58,8 +61,9 @@ Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线
 本地可完成、不需要全部原生系统的检查：
 
 ```powershell
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache artifacts/upstream
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-common --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows-host --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 
@@ -71,7 +75,7 @@ python -m unittest discover -s tests -v
 
 ## 发布与消费
 
-只有推送 tag 或手动触发才启动工作流。版本格式为 `v<已登记上游版本>-<本地标识>`，例如 `v3.12-r1`、`v3.12-preview.2`。手动触发只构建和验证；合法 tag 推送在全部安装/卸载验收通过后发布。正式资产包括 ZIP、ZIP 的 SHA-256、`toolset-manifest.json` 和 `build-provenance.json`。
+只有推送 tag 或手动触发才启动工作流。版本格式为 `v<已登记上游版本>-<本地标识>`，例如 `v3.12-r1`、`v3.12-preview.2`。手动触发只构建和验证；合法 tag 推送在全部安装/卸载验收通过后发布。正式资产包括 ZIP、ZIP 的 SHA-256、`toolset-manifest.json`、`build-provenance.json` 和 `source-record.md`。
 
 Actions 临时 artifact 只用于 job 间传递。消费者必须使用带版本的 GitHub Release 资产，固定外层 ZIP SHA-256，校验内部 Manifest，只选择一个宿主，恢复权限，设置声明的环境变量，并分发或调用 `common/` 与该宿主运行集。不得使用 Actions artifact 或 `latest` URL。`DotNet.Bundler.Nsis` 只是一个可能的消费者，不享有特殊地位，也不定义本项目规范。
 

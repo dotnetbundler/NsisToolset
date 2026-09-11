@@ -1,15 +1,19 @@
 import io
 import json
 import os
+import re
+import shlex
 import stat
 import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
-from build_tools import native_build
-from build_tools import toolset_operations as toolset
+from build_tools import configuration, native_build, packaging, release_tasks, smoke_tests, staging, upstream
+from build_tools.ci_cli import create_parser as create_ci_parser
+from build_tools.toolset_cli import create_parser as create_toolset_parser
 
 
 class ToolsetTests(unittest.TestCase):
@@ -30,9 +34,7 @@ class ToolsetTests(unittest.TestCase):
             "launchers": {"windows": "makensis.cmd", "posix": "makensis"},
             "hosts": {},
         }
-        (stage / "makensis.cmd").write_text("launcher")
-        (stage / "makensis").write_text("#!/bin/sh\n")
-        (stage / "makensis").chmod(0o755)
+        staging.write_root_launchers(stage)
         hosts = (
             ("win-x86", "win-x86", "makensis.exe", False, ["win-x86", "win-x64", "win-arm64"]),
             ("linux-x64", "linux-x64", "makensis", True, ["linux-x64"]),
@@ -57,98 +59,75 @@ class ToolsetTests(unittest.TestCase):
             }
         return stage, config
 
-    def test_zip_is_deterministic_and_permissions_are_repairable(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            stage, config = self.make_stage(root)
-            toolset.generate_manifest(config, stage)
-            first, second = root / "one.zip", root / "two.zip"
-            toolset.deterministic_zip(stage, first, config["sourceDateEpoch"])
-            toolset.deterministic_zip(stage, second, config["sourceDateEpoch"])
-            self.assertEqual(toolset.sha256(first), toolset.sha256(second))
-            extracted = root / "extracted"
-            toolset.safe_extract_zip_flat(first, extracted)
-            manifest = toolset.verify_manifest(extracted, repair_modes=True)
-            self.assertEqual(5, len(manifest["hosts"]))
-            self.assertEqual("x86", manifest["hosts"][0]["architecture"])
-            self.assertIn("win-arm64", manifest["hosts"][0]["compatibleHostRids"])
-            self.assertNotIn("convenienceLauncher", manifest["hosts"][0])
-            executable = next(item for item in manifest["files"] if item["path"] == "makensis")
-            self.assertTrue(executable["requiresExecutable"])
-            with zipfile.ZipFile(first) as bundle:
-                self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
-                self.assertFalse(any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
-            if os.name != "nt":
-                self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
-
-    def test_local_labels_produce_distinct_manifests_and_archives(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            hashes = []
-            for label in ("3.12-r1", "3.12-preview.2"):
-                stage, config = self.make_stage(root / label, label)
-                toolset.generate_manifest(config, stage)
-                archive = root / (label + ".zip")
-                toolset.deterministic_zip(stage, archive, config["sourceDateEpoch"])
-                hashes.append(toolset.sha256(archive))
-            self.assertNotEqual(hashes[0], hashes[1])
+    def make_windows_archive(self, root: Path):
+        archive = root / "windows.zip"
+        pe = bytearray(128)
+        pe[:2] = b"MZ"
+        pe[0x3C:0x40] = (64).to_bytes(4, "little")
+        pe[64:68] = b"PE\0\0"
+        pe[68:70] = (0x014C).to_bytes(2, "little")
+        with zipfile.ZipFile(archive, "w") as bundle:
+            for name in staging.COMMON_ITEMS:
+                suffix = "/data" if name in {"Contrib", "Include", "Plugins", "Stubs"} else ""
+                bundle.writestr(f"nsis/{name}{suffix}", name.encode())
+            bundle.writestr("nsis/Bin/makensis.exe", pe)
+            bundle.writestr("nsis/Bin/zlib1.dll", b"zlib")
+        spec = {
+            "fileName": archive.name,
+            "size": archive.stat().st_size,
+            "digests": {
+                "upstreamPublished": {"sha1": upstream.digest(archive, "sha1"), "md5": "record-only"},
+                "locallyDerived": {"sha256": upstream.sha256(archive)},
+            },
+        }
+        config = {"upstream": {"windowsZip": spec}}
+        return archive, config
 
     def test_version_resolution_uses_longest_registered_upstream(self):
         with tempfile.TemporaryDirectory() as temporary:
             configs = Path(temporary)
             for version in ("3.12", "3.12-preview"):
-                (configs / (version + ".json")).write_text(
-                    json.dumps(
-                        {
-                            "upstreamVersion": version,
-                            "sourceDateEpoch": 1,
-                            "upstream": {
-                                "windowsZip": {"fileName": "win.zip"},
-                                "sourceArchive": {"fileName": "src.tar"},
-                            },
-                        }
-                    )
-                )
-            resolved = toolset.resolve_version("v3.12-preview-r1", configs)
+                (configs / f"{version}.json").write_text(json.dumps({"upstreamVersion": version, "sourceDateEpoch": 1, "upstream": {"windowsZip": {"fileName": "win.zip"}, "sourceArchive": {"fileName": "src.tar"}}}))
+            resolved = configuration.resolve_version("v3.12-preview-r1", configs)
             self.assertEqual("3.12-preview", resolved["upstreamVersion"])
             self.assertEqual("r1", resolved["localVersion"])
-            resolved = toolset.resolve_version("v3.12-preview.2", configs)
+            resolved = configuration.resolve_version("v3.12-preview.2", configs)
             self.assertEqual("3.12", resolved["upstreamVersion"])
             self.assertEqual("preview.2", resolved["localVersion"])
 
     def test_invalid_or_unregistered_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             configs = Path(temporary)
-            with self.assertRaises(RuntimeError):
-                toolset.resolve_version("v3.12", configs)
-            with self.assertRaises(RuntimeError):
-                toolset.resolve_version("v3.12-../bad", configs)
-            with self.assertRaises(RuntimeError):
-                toolset.resolve_version("release-3.12-r1", configs)
+            for version in ("v3.12", "v3.12-../bad", "release-3.12-r1"):
+                with self.subTest(version=version), self.assertRaises(RuntimeError):
+                    configuration.resolve_version(version, configs)
 
-    def test_tampering_is_detected(self):
+    def test_upstream_check_requires_size_published_sha1_and_derived_sha256(self):
         with tempfile.TemporaryDirectory() as temporary:
-            stage = Path(temporary)
-            payload = stage / "payload"
-            payload.write_text("good")
-            manifest = {
-                "toolsetVersion": "test",
-                "launchers": {"windows": "makensis.cmd", "posix": "makensis"},
-                "hosts": [],
-                "files": [toolset.file_record(stage, payload)],
-            }
-            (stage / "toolset-manifest.json").write_text(json.dumps(manifest))
-            payload.write_text("bad")
-            with self.assertRaises(RuntimeError):
-                toolset.verify_manifest(stage)
+            path = Path(temporary) / "input"
+            path.write_bytes(b"fixed upstream bytes")
+            spec = {"size": path.stat().st_size, "digests": {"upstreamPublished": {"sha1": upstream.digest(path, "sha1"), "md5": "record-only"}, "locallyDerived": {"sha256": upstream.sha256(path)}}}
+            upstream.checked_file(path, spec)
+            for key, value in (("size", 0), ("sha1", "0" * 40), ("sha256", "0" * 64)):
+                changed = json.loads(json.dumps(spec))
+                if key == "size":
+                    changed["size"] = value
+                elif key == "sha1":
+                    changed["digests"]["upstreamPublished"][key] = value
+                else:
+                    changed["digests"]["locallyDerived"][key] = value
+                with self.subTest(key=key), self.assertRaises(RuntimeError):
+                    upstream.checked_file(path, changed)
 
-    def test_unsafe_zip_member_is_rejected(self):
+    def test_unsafe_zip_members_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            archive = Path(temporary) / "bad.zip"
-            with zipfile.ZipFile(archive, "w") as bundle:
-                bundle.writestr("../escape", b"bad")
-            with self.assertRaises(RuntimeError):
-                toolset.safe_extract_zip_flat(archive, Path(temporary) / "out")
+            root = Path(temporary)
+            for index, member in enumerate(("../escape", "..\\escape", "/absolute", "C:/absolute")):
+                archive = root / f"bad-{index}.zip"
+                with zipfile.ZipFile(archive, "w") as bundle:
+                    bundle.writestr(member, b"bad")
+                with self.subTest(member=member), self.assertRaises(RuntimeError):
+                    upstream.safe_extract_zip_flat(archive, root / f"out-{index}")
 
     def test_source_archive_extraction_requires_one_safe_root(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -161,7 +140,6 @@ class ToolsetTests(unittest.TestCase):
                 bundle.addfile(item, io.BytesIO(content))
             source = native_build.safe_extract_source(archive, root / "out")
             self.assertEqual(b"source", (source / "file.txt").read_bytes())
-
             unsafe = root / "unsafe.tar.bz2"
             with tarfile.open(unsafe, "w:bz2") as bundle:
                 item = tarfile.TarInfo("../escape")
@@ -170,33 +148,18 @@ class ToolsetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 native_build.safe_extract_source(unsafe, root / "unsafe-out")
 
-    def test_upstream_check_requires_published_sha1_and_derived_sha256(self):
+    def test_common_and_windows_host_are_staged_independently(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "input"
-            path.write_bytes(b"fixed upstream bytes")
-            spec = {
-                "size": path.stat().st_size,
-                "digests": {
-                    "upstreamPublished": {
-                        "sha1": toolset.digest(path, "sha1"),
-                        "md5": "record-only",
-                    },
-                    "locallyDerived": {"sha256": toolset.sha256(path)},
-                },
-            }
-            toolset.checked_file(path, spec)
-            spec["digests"]["upstreamPublished"]["sha1"] = "0" * 40
-            with self.assertRaises(RuntimeError):
-                toolset.checked_file(path, spec)
-
-    def test_python_build_script_cannot_leak_into_toolset(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            stage, config = self.make_stage(Path(temporary))
-            leaked = stage / "scripts" / "toolset.py"
-            leaked.parent.mkdir()
-            leaked.write_text("print('leaked')")
-            with self.assertRaises(RuntimeError):
-                toolset.generate_manifest(config, stage)
+            root = Path(temporary)
+            archive, config = self.make_windows_archive(root)
+            stage, work = root / "stage", root / "work"
+            staging.stage_common(config, archive, stage, work)
+            self.assertTrue((stage / "common/Include/data").is_file())
+            self.assertTrue((stage / "makensis.cmd").is_file())
+            self.assertFalse((stage / "hosts").exists())
+            staging.stage_windows_host(config, archive, stage, work)
+            self.assertTrue((stage / "hosts/win-x86/makensis.exe").is_file())
+            staging.verify_windows_x86(stage / "hosts/win-x86/makensis.exe")
 
     def test_windows_binary_must_be_x86_pe(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -208,21 +171,157 @@ class ToolsetTests(unittest.TestCase):
             data[68:70] = (0x8664).to_bytes(2, "little")
             binary.write_bytes(data)
             with self.assertRaises(RuntimeError):
-                toolset.verify_windows_x86(binary)
+                staging.verify_windows_x86(binary)
             data[68:70] = (0x014C).to_bytes(2, "little")
             binary.write_bytes(data)
-            toolset.verify_windows_x86(binary)
+            staging.verify_windows_x86(binary)
 
     def test_root_dispatchers_cover_supported_hosts(self):
         with tempfile.TemporaryDirectory() as temporary:
             stage = Path(temporary)
-            toolset.write_root_launchers(stage)
+            staging.write_root_launchers(stage)
             windows = (stage / "makensis.cmd").read_text()
             posix = (stage / "makensis").read_text()
             self.assertIn("hosts\\win-x86\\makensis.exe", windows)
             for value in ("Linux:x86_64", "Linux:aarch64", "Darwin:x86_64", "Darwin:arm64"):
                 self.assertIn(value, posix)
             self.assertIn("unsupported host", posix)
+
+    def test_smoke_tests_invoke_only_root_launchers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stage = root / "stage"
+            staging.write_root_launchers(stage)
+            fixture = root / "minimal.nsi"
+            fixture.write_text("fixture")
+            config = {"upstreamVersion": "3.12", "toolsetVersion": "3.12-r1"}
+
+            def produce_installer(command, cwd=None, **_kwargs):
+                Path(cwd, "smoke-installer.exe").write_bytes(b"installer")
+
+            with mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock, mock.patch.object(smoke_tests, "require_version") as version_mock:
+                smoke_tests.windows_smoke(config, stage, fixture, root / "windows-smoke")
+                self.assertIn(stage.resolve() / "makensis.cmd", version_mock.call_args.args[0])
+                self.assertIn(stage.resolve() / "makensis.cmd", run_mock.call_args.args[0])
+
+            metadata = root / "metadata.json"
+            metadata.write_text("{}")
+            binary = root / "makensis"
+            binary.write_bytes(b"binary")
+            with mock.patch.object(staging, "stage_host"), mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock, mock.patch.object(smoke_tests, "require_version") as version_mock:
+                smoke_tests.native_smoke(config, "linux-x64", binary, metadata, stage, fixture, root / "native-smoke")
+                self.assertEqual(stage.resolve() / "makensis", version_mock.call_args.args[0][0])
+                self.assertEqual(stage.resolve() / "makensis", run_mock.call_args.args[0][0])
+
+            release_stage, release_config = self.make_stage(root / "release", "3.12-r1")
+            packaging.generate_manifest(release_config, release_stage)
+            archive = root / "release.zip"
+            packaging.deterministic_zip(release_stage, archive, release_config["sourceDateEpoch"])
+            destination = root / "release package with spaces"
+            with mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock, mock.patch.object(smoke_tests, "require_version") as version_mock:
+                smoke_tests.release_package_smoke(config, archive, destination, root / "release-smoke", fixture)
+                self.assertEqual(destination.resolve() / "makensis", version_mock.call_args.args[0][0])
+                self.assertEqual(destination.resolve() / "makensis", run_mock.call_args.args[0][0])
+
+    def test_installer_uses_requested_artifact_directory_and_uninstalls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installer = root / "smoke-installer.exe"
+            installer.write_bytes(b"installer")
+            install_root = root / "artifacts" / "installed" / "win-x86"
+            commands = []
+
+            def simulate(command, **_kwargs):
+                commands.append(command)
+                if command[0] == installer.resolve():
+                    install_root.mkdir(parents=True)
+                    (install_root / "installed.txt").write_text("installed")
+                    (install_root / "uninstall.exe").write_bytes(b"uninstaller")
+                else:
+                    for child in install_root.iterdir():
+                        child.unlink()
+                    install_root.rmdir()
+
+            with mock.patch.object(release_tasks, "run", side_effect=simulate):
+                release_tasks.test_installer(installer, install_root)
+            self.assertEqual(f"/D={install_root.resolve()}", commands[0][-1])
+            self.assertFalse(install_root.exists())
+
+    def test_manifest_is_complete_and_rejects_repository_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stage, config = self.make_stage(root)
+            manifest = packaging.generate_manifest(config, stage)
+            self.assertEqual(5, len(manifest["hosts"]))
+            self.assertEqual("x86", manifest["hosts"][0]["architecture"])
+            self.assertIn("win-arm64", manifest["hosts"][0]["compatibleHostRids"])
+            leaked = stage / "build_tools" / "helper.py"
+            leaked.parent.mkdir()
+            leaked.write_text("print('leaked')")
+            with self.assertRaises(RuntimeError):
+                packaging.generate_manifest(config, stage)
+
+    def test_zip_is_deterministic_and_permissions_are_repairable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stage, config = self.make_stage(root)
+            packaging.generate_manifest(config, stage)
+            first, second = root / "one.zip", root / "two.zip"
+            packaging.deterministic_zip(stage, first, config["sourceDateEpoch"])
+            packaging.deterministic_zip(stage, second, config["sourceDateEpoch"])
+            self.assertEqual(upstream.sha256(first), upstream.sha256(second))
+            extracted = root / "release package with spaces"
+            manifest = packaging.verify_zip(first, extracted)
+            executable = next(item for item in manifest["files"] if item["path"] == "makensis")
+            self.assertTrue(executable["requiresExecutable"])
+            with zipfile.ZipFile(first) as bundle:
+                self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
+                forbidden = packaging.FORBIDDEN_RELEASE_ROOTS
+                self.assertFalse(any(Path(name).parts[0] in forbidden or name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
+            if os.name != "nt":
+                self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
+
+    def test_local_labels_produce_distinct_manifests_and_archives(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            hashes = []
+            for label in ("3.12-r1", "3.12-preview.2"):
+                stage, config = self.make_stage(root / label, label)
+                packaging.generate_manifest(config, stage)
+                archive = root / f"{label}.zip"
+                packaging.deterministic_zip(stage, archive, config["sourceDateEpoch"])
+                hashes.append(upstream.sha256(archive))
+            self.assertNotEqual(hashes[0], hashes[1])
+
+    def test_tampering_is_detected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary)
+            payload = stage / "payload"
+            payload.write_text("good")
+            manifest = {"toolsetVersion": "test", "launchers": {"windows": "makensis.cmd", "posix": "makensis"}, "hosts": [], "files": [packaging.file_record(stage, payload)]}
+            (stage / "toolset-manifest.json").write_text(json.dumps(manifest))
+            payload.write_text("bad")
+            with self.assertRaises(RuntimeError):
+                packaging.verify_manifest(stage)
+
+    def test_cli_parsers_expose_only_current_commands(self):
+        toolset_commands = set(create_toolset_parser()._subparsers._group_actions[0].choices)
+        ci_commands = set(create_ci_parser()._subparsers._group_actions[0].choices)
+        self.assertEqual({"resolve-version", "download", "stage-common", "stage-windows-host"}, toolset_commands)
+        self.assertEqual({"windows-smoke", "native-build-twice", "native-smoke", "assemble", "release-package-smoke", "test-installer", "publish"}, ci_commands)
+        self.assertNotIn("relocated-smoke", ci_commands)
+        self.assertNotIn("windows-stage-smoke", ci_commands)
+
+    def test_workflow_python_commands_match_cli_parsers(self):
+        workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        commands = re.findall(r"^\s*run: (python -m build_tools\.(?:toolset_cli|ci_cli) .+)$", workflow, flags=re.MULTILINE)
+        self.assertGreaterEqual(len(commands), 10)
+        for command in commands:
+            normalized = re.sub(r"\$\{\{[^}]+\}\}", "value", command).replace("$REQUESTED_VERSION", "v3.12-r1").replace("$GITHUB_OUTPUT", "output").replace("$GITHUB_SHA", "commit")
+            tokens = shlex.split(normalized)
+            parser = create_toolset_parser() if tokens[2].endswith("toolset_cli") else create_ci_parser()
+            with self.subTest(command=command):
+                parser.parse_args(tokens[3:])
 
 
 if __name__ == "__main__":

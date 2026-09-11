@@ -4,18 +4,18 @@ OutFile "smoke-installer.exe"
 RequestExecutionLevel user
 SilentInstall silent
 SilentUnInstall silent
+InstallDir "$TEMP\NsisToolsetSmoke"
 
 Section
-  SetOutPath "$TEMP\\NsisToolsetSmoke"
-  FileOpen $0 "$TEMP\\NsisToolsetSmoke\\installed.txt" w
+  SetOutPath "$INSTDIR"
+  FileOpen $0 "$INSTDIR\installed.txt" w
   FileWrite $0 "installed"
   FileClose $0
-  WriteUninstaller "$TEMP\\NsisToolsetSmoke\\uninstall.exe"
+  WriteUninstaller "$INSTDIR\uninstall.exe"
 SectionEnd
 
 Section "Uninstall"
-  Delete "$TEMP\\NsisToolsetSmoke\\installed.txt"
-  Delete "$TEMP\\NsisToolsetSmoke\\uninstall.exe"
-  RMDir "$TEMP\\NsisToolsetSmoke"
+  Delete "$INSTDIR\installed.txt"
+  Delete "$INSTDIR\uninstall.exe"
+  RMDir "$INSTDIR"
 SectionEnd
-

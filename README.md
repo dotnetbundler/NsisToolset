@@ -39,12 +39,15 @@ Every file is inventoried with path, SHA-256, size, normalized Unix mode, and ex
 
 The workflow uses native GitHub-hosted runners: Ubuntu 24.04 x64/arm64, macOS 15 Intel/Apple Silicon, and Windows Server 2022. Native compilers use the upstream `install-compiler` target with all stubs, plug-ins, utilities, miscellaneous tools, and documentation skipped. Common installer data always comes from the exact matching official Windows ZIP.
 
-Each native compiler is built twice on the same runner and the bytes must match. Every host reports the selected upstream version and compiles `fixtures/minimal.nsi` through both its real binary and the root dispatcher. Assembly verifies the complete declared file set, hashes, versions, permissions policy, host metadata, and relocation from a path containing spaces. A final Windows job runs all five host-generated installers, checks their installed marker, runs each uninstaller, and checks cleanup.
+Each native compiler is built twice on the same runner and the bytes must match. Every host reports the selected upstream version and compiles `fixtures/minimal.nsi` through the package root launcher. A Windows job then runs all five host-generated installers, checks their installed marker, runs each uninstaller, and checks cleanup. Only after that succeeds does Ubuntu assemble the release, verify the complete declared file set, hashes, versions, permissions policy, host metadata, reproducible ZIP bytes, and relocation to a path containing spaces.
 
 ## Python files in this repository
 
-- `build_tools/toolset_operations.py` provides reusable download, staging, manifest, and packaging operations.
-- `build_tools/toolset_cli.py` exposes those operations as local and CI commands.
+- `build_tools/configuration.py` validates toolset versions and merges base and per-upstream configuration.
+- `build_tools/upstream.py` downloads, verifies, and safely extracts upstream archives.
+- `build_tools/staging.py` stages common data, root launchers, and host runtimes.
+- `build_tools/packaging.py` creates records, manifests, and reproducible release archives.
+- `build_tools/toolset_cli.py` exposes reusable version, download, and staging commands.
 - `build_tools/ci_cli.py` dispatches CI-specific tasks.
 - `build_tools/native_build.py`, `build_tools/smoke_tests.py`, and `build_tools/release_tasks.py` contain native build, smoke-test, and release responsibilities respectively.
 - `build_tools/ci_support.py` contains shared process and filesystem helpers.
@@ -58,8 +61,9 @@ Linux uses a static userspace binary and checks its GNU ABI note (kernel 3.2 for
 Local checks that do not require all native operating systems:
 
 ```powershell
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache .cache/upstream
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows --archive .cache/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache artifacts/upstream
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-common --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows-host --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
 python -m unittest discover -s tests -v
 ```
 

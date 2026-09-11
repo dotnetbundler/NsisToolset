@@ -1,49 +1,37 @@
-"""Fast end-to-end checks for staged NSIS compilers."""
+"""End-to-end checks that exercise toolset root launchers."""
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
-from . import toolset_operations as toolset
+from . import packaging, staging
 from .ci_support import recreate, require_version, run
 
 
-def windows_stage_and_smoke(config: dict, archive: Path, stage: Path, work: Path, fixture: Path, smoke: Path) -> None:
-    toolset.stage_windows(config, archive, stage, work)
-    environment = os.environ.copy()
-    environment["NSISDIR"] = str((stage / "common").resolve())
-    require_version([stage / "hosts/win-x86/makensis.exe", "-VERSION"], config["upstreamVersion"], env=environment)
-    require_version(["cmd.exe", "/d", "/c", stage / "makensis.cmd", "-VERSION"], config["upstreamVersion"], env=environment)
+def _compile_with_launcher(config: dict, stage: Path, fixture: Path, smoke: Path, launcher: list[str | Path]) -> None:
     recreate(smoke)
     shutil.copy2(fixture, smoke / fixture.name)
-    run([stage.resolve() / "hosts/win-x86/makensis.exe", fixture.name], cwd=smoke, env=environment)
+    require_version([*launcher, "-VERSION"], config["upstreamVersion"], cwd=smoke)
+    run([*launcher, fixture.name], cwd=smoke)
     if not (smoke / "smoke-installer.exe").is_file():
-        raise RuntimeError("Windows compiler smoke test did not produce an installer")
+        raise RuntimeError("root launcher smoke test did not produce an installer")
 
 
-def native_smoke(config: dict, archive: Path, rid: str, binary: Path, metadata: Path, stage: Path, work: Path, fixture: Path, smoke: Path) -> None:
-    toolset.stage_windows(config, archive, stage, work)
-    toolset.stage_host(config, stage, rid, binary, metadata)
-    recreate(smoke)
-    shutil.copy2(fixture, smoke / fixture.name)
-    environment = os.environ.copy()
-    environment["NSISDIR"] = str((stage / "common").resolve())
-    direct = (stage / config["hosts"][rid]["binary"]).resolve()
-    run([direct, fixture.name], cwd=smoke, env=environment)
-    require_version([stage.resolve() / "makensis", "-VERSION"], config["upstreamVersion"], cwd=smoke, env=environment)
-    if not (smoke / "smoke-installer.exe").is_file():
-        raise RuntimeError(f"{rid} smoke test did not produce an installer")
+def windows_smoke(config: dict, stage: Path, fixture: Path, smoke: Path) -> None:
+    launcher = ["cmd.exe", "/d", "/c", stage.resolve() / "makensis.cmd"]
+    _compile_with_launcher(config, stage, fixture, smoke, launcher)
 
 
-def relocated_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:
-    toolset.verify_zip(archive, destination)
-    recreate(smoke)
-    shutil.copy2(fixture, smoke / fixture.name)
-    environment = os.environ.copy()
-    environment["NSISDIR"] = str((destination / "common").resolve())
-    run([destination.resolve() / "hosts/linux-x64/makensis", fixture.name], cwd=smoke, env=environment)
-    require_version([destination.resolve() / "makensis", "-VERSION"], config["upstreamVersion"], cwd=smoke, env=environment)
-    if not (smoke / "smoke-installer.exe").is_file():
-        raise RuntimeError("relocated smoke test did not produce an installer")
+def native_smoke(config: dict, rid: str, binary: Path, metadata: Path, stage: Path, fixture: Path, smoke: Path) -> None:
+    staging.stage_host(config, stage, rid, binary, metadata)
+    launcher = stage.resolve() / "makensis"
+    launcher.chmod(0o755)
+    _compile_with_launcher(config, stage, fixture, smoke, [launcher])
+
+
+def release_package_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:
+    manifest = packaging.verify_zip(archive, destination)
+    if manifest["toolsetVersion"] != config["toolsetVersion"]:
+        raise RuntimeError("release package manifest version does not match requested toolset")
+    _compile_with_launcher(config, destination, fixture, smoke, [destination.resolve() / "makensis"])

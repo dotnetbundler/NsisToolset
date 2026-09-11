@@ -10,10 +10,9 @@ import re
 import shutil
 import subprocess
 import tarfile
-import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from . import toolset_operations as toolset
+from . import upstream
 from .ci_support import recreate, run
 
 
@@ -58,9 +57,7 @@ def safe_extract_source(archive: Path, destination: Path) -> Path:
     with tarfile.open(archive, "r:bz2") as bundle:
         roots: set[str] = set()
         for member in bundle.getmembers():
-            relative = PurePosixPath(member.name)
-            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
-                raise RuntimeError(f"unsafe source archive member: {member.name}")
+            relative = upstream.safe_archive_path(member.name)
             roots.add(relative.parts[0])
         if len(roots) != 1:
             raise RuntimeError(f"expected one source archive root, found {len(roots)}")
@@ -74,7 +71,7 @@ def safe_extract_source(archive: Path, destination: Path) -> Path:
 def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path) -> None:
     if rid not in {"linux-x64", "linux-arm64", "osx-x64", "osx-arm64"}:
         raise RuntimeError(f"unsupported RID: {rid}")
-    toolset.checked_file(archive, config["upstream"]["sourceArchive"])
+    upstream.checked_file(archive, config["upstream"]["sourceArchive"])
     recreate(work)
     recreate(output)
     source = safe_extract_source(archive, work / "src")
@@ -158,10 +155,9 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
     )
 
 
-def build_twice(config: dict, archive: Path, rid: str, first: Path, second: Path) -> None:
-    temporary = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
-    build_native(config, archive, first, rid, temporary / f"nsis-build-{rid}-1")
-    build_native(config, archive, second, rid, temporary / f"nsis-build-{rid}-2")
+def build_twice(config: dict, archive: Path, rid: str, first: Path, second: Path, work: Path) -> None:
+    build_native(config, archive, first, rid, work / f"{rid}-1")
+    build_native(config, archive, second, rid, work / f"{rid}-2")
     if (first / "makensis").read_bytes() != (second / "makensis").read_bytes():
         raise RuntimeError(f"repeated {rid} builds produced different compiler bytes")
     print(f"repeated {rid} builds are byte-identical")
