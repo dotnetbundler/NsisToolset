@@ -49,13 +49,7 @@ def write_provenance(metadata_root: Path, upstream_version: str, output: Path) -
     return record
 
 
-def assemble(
-    config: dict,
-    stage: Path,
-    hosts: Path,
-    artifacts: Path,
-    source_commit: str,
-) -> None:
+def assemble(config: dict, stage: Path, hosts: Path, artifacts: Path, source_commit: str) -> None:
     for rid in ("linux-x64", "linux-arm64", "osx-x64", "osx-arm64"):
         root = hosts / f"host-{rid}"
         toolset.stage_host(

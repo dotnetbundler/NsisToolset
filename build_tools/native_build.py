@@ -21,18 +21,7 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace").strip()
 
 
-def write_metadata(
-    *,
-    rid: str,
-    binary: Path,
-    version_file: Path,
-    file_report: Path,
-    dependencies: Path,
-    upstream_version: str,
-    source_date_epoch: str,
-    output: Path,
-    environment: dict[str, str],
-) -> dict:
+def write_metadata(*, rid: str, binary: Path, version_file: Path, file_report: Path, dependencies: Path, upstream_version: str, source_date_epoch: str, output: Path, environment: dict[str, str]) -> dict:
     data = binary.read_bytes()
     metadata = {
         "rid": rid,

@@ -97,44 +97,15 @@ def main() -> None:
         parser.error("--upstream-config and --toolset-version are required")
     config = toolset.merged_config(args.config, args.upstream_config, args.toolset_version)
     if args.command == "windows-stage-smoke":
-        smoke_tests.windows_stage_and_smoke(
-            config,
-            args.archive,
-            args.stage,
-            args.work,
-            args.fixture,
-            args.smoke,
-        )
+        smoke_tests.windows_stage_and_smoke(config, args.archive, args.stage, args.work, args.fixture, args.smoke)
     elif args.command == "native-build-twice":
         native_build.build_twice(config, args.archive, args.rid, args.first, args.second)
     elif args.command == "native-smoke":
-        smoke_tests.native_smoke(
-            config,
-            args.archive,
-            args.rid,
-            args.binary,
-            args.metadata,
-            args.stage,
-            args.work,
-            args.fixture,
-            args.smoke,
-        )
+        smoke_tests.native_smoke(config, args.archive, args.rid, args.binary, args.metadata, args.stage, args.work, args.fixture, args.smoke)
     elif args.command == "assemble":
-        release_tasks.assemble(
-            config,
-            args.stage,
-            args.hosts,
-            args.artifacts,
-            args.source_commit,
-        )
+        release_tasks.assemble(config, args.stage, args.hosts, args.artifacts, args.source_commit)
     elif args.command == "relocated-smoke":
-        smoke_tests.relocated_smoke(
-            config,
-            args.archive,
-            args.destination,
-            args.smoke,
-            args.fixture,
-        )
+        smoke_tests.relocated_smoke(config, args.archive, args.destination, args.smoke, args.fixture)
     elif args.command == "publish":
         release_tasks.publish(config, args.dist)
 
