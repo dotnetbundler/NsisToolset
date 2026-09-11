@@ -11,14 +11,7 @@ from pathlib import Path
 def run(command: list[str | Path], *, cwd: Path | None = None, env: dict[str, str] | None = None, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     normalized = [str(item) for item in command]
     print(f"+ {shlex.join(normalized)}", flush=True)
-    return subprocess.run(
-        normalized,
-        cwd=cwd,
-        env=env,
-        text=True,
-        capture_output=capture,
-        check=check,
-    )
+    return subprocess.run(normalized, cwd=cwd, env=env, text=True, capture_output=capture, check=check)
 
 
 def recreate(directory: Path) -> None:

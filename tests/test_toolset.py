@@ -77,9 +77,7 @@ class ToolsetTests(unittest.TestCase):
             self.assertTrue(executable["requiresExecutable"])
             with zipfile.ZipFile(first) as bundle:
                 self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
-                self.assertFalse(
-                    any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist())
-                )
+                self.assertFalse(any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
             if os.name != "nt":
                 self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
 

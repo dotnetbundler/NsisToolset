@@ -30,9 +30,7 @@ def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) ->
         raise RuntimeError(f"upstream config filename/version mismatch: {upstream_path}")
     prefix = f"{upstream['upstreamVersion']}-"
     if not toolset_version.startswith(prefix):
-        raise RuntimeError(
-            f"toolset version {toolset_version} does not use upstream {upstream['upstreamVersion']}"
-        )
+        raise RuntimeError(f"toolset version {toolset_version} does not use upstream {upstream['upstreamVersion']}")
     local_version = toolset_version[len(prefix) :]
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.-]*", local_version):
         raise RuntimeError(f"invalid local version label: {local_version}")
@@ -42,9 +40,7 @@ def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) ->
 
 def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> dict[str, str]:
     if not re.fullmatch(r"v[0-9][0-9A-Za-z.-]*-[0-9A-Za-z][0-9A-Za-z.-]*", version):
-        raise RuntimeError(
-            "version must have form v<upstream>-<local>, for example v3.12-r1 or v3.12-preview.2"
-        )
+        raise RuntimeError("version must have form v<upstream>-<local>, for example v3.12-r1 or v3.12-preview.2")
     candidates = []
     for path in upstream_dir.glob("*.json"):
         upstream_version = path.stem
@@ -99,10 +95,7 @@ def checked_file(path: Path, spec: dict) -> None:
         or actual_sha1 != expected_sha1
         or actual_sha256 != expected_sha256
     ):
-        raise RuntimeError(
-            f"upstream verification failed for {path.name}: "
-            f"size={actual_size}, sha1={actual_sha1}, sha256={actual_sha256}"
-        )
+        raise RuntimeError(f"upstream verification failed for {path.name}: size={actual_size}, sha1={actual_sha1}, sha256={actual_sha256}")
 
 
 def download(config: dict, cache: Path) -> None:
@@ -117,9 +110,7 @@ def download(config: dict, cache: Path) -> None:
             except RuntimeError:
                 destination.unlink()
         temporary = destination.with_suffix(destination.suffix + ".partial")
-        request = urllib.request.Request(
-            spec["url"], headers={"User-Agent": "NsisToolset reproducible builder"}
-        )
+        request = urllib.request.Request(spec["url"], headers={"User-Agent": "NsisToolset reproducible builder"})
         last_error: Exception | None = None
         for attempt in range(1, 4):
             try:
@@ -286,9 +277,7 @@ def generate_manifest(config: dict, stage: Path) -> dict:
     for staged_file in (p for p in stage.rglob("*") if p.is_file()):
         relative = staged_file.relative_to(stage)
         if relative.suffix.lower() == ".py" or relative.parts[0] in forbidden_roots:
-            raise RuntimeError(
-                f"repository build/test file leaked into toolset: {relative.as_posix()}"
-            )
+            raise RuntimeError(f"repository build/test file leaked into toolset: {relative.as_posix()}")
     hosts = []
     for rid, spec in config["hosts"].items():
         if not (stage / spec["binary"]).is_file():
@@ -296,11 +285,7 @@ def generate_manifest(config: dict, stage: Path) -> dict:
         nsisdir = spec.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath")
         if nsisdir != "common":
             raise RuntimeError(f"{rid} must declare NSISDIR as toolset-relative common")
-        runtime_files = sorted(
-            p.relative_to(stage).as_posix()
-            for p in (stage / "hosts" / spec["directory"]).rglob("*")
-            if p.is_file()
-        )
+        runtime_files = sorted(p.relative_to(stage).as_posix() for p in (stage / "hosts" / spec["directory"]).rglob("*") if p.is_file())
         hosts.append({"rid": rid, **spec, "runtimeFiles": runtime_files})
     for launcher in config["launchers"].values():
         if not (stage / launcher).is_file():
@@ -327,9 +312,7 @@ def generate_manifest(config: dict, stage: Path) -> dict:
         "executablePermissionPolicy": "After ZIP extraction, chmod every file whose requiresExecutable is true to its unixMode before executing it.",
     }
     target = stage / "toolset-manifest.json"
-    target.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
-    )
+    target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
 
@@ -341,9 +324,7 @@ def verify_manifest(stage: Path, repair_modes: bool = False) -> dict:
         p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file() and p != path
     }
     if actual != declared:
-        raise RuntimeError(
-            f"manifest file set mismatch; missing={sorted(declared - actual)}, extra={sorted(actual - declared)}"
-        )
+        raise RuntimeError(f"manifest file set mismatch; missing={sorted(declared - actual)}, extra={sorted(actual - declared)}")
     for record in manifest["files"]:
         file_path = stage / PurePosixPath(record["path"])
         if file_path.stat().st_size != record["size"] or sha256(file_path) != record["sha256"]:
@@ -371,9 +352,7 @@ def deterministic_zip(stage: Path, destination: Path, epoch: int) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     modes = {record["path"]: int(record["unixMode"], 8) for record in manifest["files"]}
     modes["toolset-manifest.json"] = 0o644
-    with zipfile.ZipFile(
-        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-    ) as bundle:
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
         for path in sorted(p for p in stage.rglob("*") if p.is_file()):
             relative = path.relative_to(stage).as_posix()
             info = zipfile.ZipInfo(relative, timestamp)
@@ -410,9 +389,7 @@ def write_build_record(config: dict, stage: Path, source_commit: str) -> dict:
         },
     }
     target = stage / "build-record.json"
-    target.write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
-    )
+    target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return record
 
 

@@ -37,20 +37,8 @@ def write_metadata(*, rid: str, binary: Path, version_file: Path, file_report: P
             "imageVersion": environment.get("ImageVersion"),
         },
         "toolchain": {
-            "compiler": subprocess.run(
-                [environment.get("CXX", "c++"), "--version"],
-                text=True,
-                capture_output=True,
-                env=environment,
-                check=True,
-            ).stdout.splitlines()[0],
-            "scons": subprocess.run(
-                ["scons", "--version"],
-                text=True,
-                capture_output=True,
-                env=environment,
-                check=True,
-            ).stdout.splitlines()[0],
+            "compiler": subprocess.run([environment.get("CXX", "c++"), "--version"], text=True, capture_output=True, env=environment, check=True).stdout.splitlines()[0],
+            "scons": subprocess.run(["scons", "--version"], text=True, capture_output=True, env=environment, check=True).stdout.splitlines()[0],
         },
         "buildParameters": {
             "version": upstream_version,
@@ -61,11 +49,7 @@ def write_metadata(*, rid: str, binary: Path, version_file: Path, file_report: P
         },
         "patches": [],
     }
-    output.write_text(
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    output.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return metadata
 
 
@@ -127,20 +111,10 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
         command.append("APPEND_LINKFLAGS=-static")
     elif rid == "osx-x64":
         environment["MACOSX_DEPLOYMENT_TARGET"] = "10.13"
-        command.extend(
-            [
-                "APPEND_CCFLAGS=-mmacosx-version-min=10.13",
-                "APPEND_LINKFLAGS=-mmacosx-version-min=10.13",
-            ]
-        )
+        command.extend(["APPEND_CCFLAGS=-mmacosx-version-min=10.13", "APPEND_LINKFLAGS=-mmacosx-version-min=10.13"])
     else:
         environment["MACOSX_DEPLOYMENT_TARGET"] = "11.0"
-        command.extend(
-            [
-                "APPEND_CCFLAGS=-mmacosx-version-min=11.0",
-                "APPEND_LINKFLAGS=-mmacosx-version-min=11.0",
-            ]
-        )
+        command.extend(["APPEND_CCFLAGS=-mmacosx-version-min=11.0", "APPEND_LINKFLAGS=-mmacosx-version-min=11.0"])
     command.append("install-compiler")
     run(command, env=environment)
 
@@ -148,11 +122,7 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
     shutil.copy2(install / "makensis", binary)
     binary.chmod(0o755)
     version_result = run([binary, "-VERSION"], capture=True)
-    (output / "version.txt").write_text(
-        version_result.stdout,
-        encoding="utf-8",
-        newline="\n",
-    )
+    (output / "version.txt").write_text(version_result.stdout, encoding="utf-8", newline="\n")
     if version_result.stdout.strip() != f"v{version}":
         raise RuntimeError(f"built compiler reported {version_result.stdout.strip()!r}")
 
@@ -174,11 +144,7 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
             dependency = line.strip()
             if dependency and not dependency.startswith(("/usr/lib/", "/System/Library/")):
                 raise RuntimeError(f"macOS makensis has a non-system dependency: {dependency}")
-    (output / "dependencies.txt").write_text(
-        dependencies,
-        encoding="utf-8",
-        newline="\n",
-    )
+    (output / "dependencies.txt").write_text(dependencies, encoding="utf-8", newline="\n")
     write_metadata(
         rid=rid,
         binary=binary,

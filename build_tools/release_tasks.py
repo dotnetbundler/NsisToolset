@@ -41,24 +41,14 @@ def write_provenance(metadata_root: Path, upstream_version: str, output: Path) -
         ),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    output.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return record
 
 
 def assemble(config: dict, stage: Path, hosts: Path, artifacts: Path, source_commit: str) -> None:
     for rid in ("linux-x64", "linux-arm64", "osx-x64", "osx-arm64"):
         root = hosts / f"host-{rid}"
-        toolset.stage_host(
-            config,
-            stage,
-            rid,
-            root / "makensis",
-            root / "build-metadata.json",
-        )
+        toolset.stage_host(config, stage, rid, root / "makensis", root / "build-metadata.json")
     provenance_path = artifacts / "build-provenance.json"
     write_provenance(hosts, config["upstreamVersion"], provenance_path)
     toolset.write_build_record(config, stage, source_commit)
