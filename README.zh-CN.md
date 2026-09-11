@@ -67,14 +67,6 @@ python -m unittest discover -s tests -v
 完整目录树；它还没有发布，也不是最终压缩包，因此保留 `stage` 名称比
 `release` 更准确。可以发布的文件写入 `artifacts/dist`。
 
-Python 格式化和基础检查规则统一定义在 `pyproject.toml`：
-
-```powershell
-python -m pip install -r requirements-dev.txt
-python -m ruff check scripts tests
-python -m ruff format --check scripts tests
-```
-
 完整原生构建放在 CI 中，避免用 Windows 交叉环境冒充 macOS。完整参数、输入哈希和“无补丁”记录见 [SOURCES.md](SOURCES.md)。
 
 ## 发布与消费

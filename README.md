@@ -68,14 +68,6 @@ assembled directory tree waiting to be packaged; it is deliberately called a
 stage rather than a release because it has not been published and is not the
 final archive. Publishable files are written to `artifacts/dist`.
 
-Python formatting and basic lint rules are defined in `pyproject.toml`:
-
-```powershell
-python -m pip install -r requirements-dev.txt
-python -m ruff check scripts tests
-python -m ruff format --check scripts tests
-```
-
 Native production builds belong in CI so an emulated or cross-compiled Windows environment cannot masquerade as macOS. Full arguments, input hashes, and the no-patch policy are in [SOURCES.md](SOURCES.md).
 
 ## Release
