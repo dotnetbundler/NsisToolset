@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -18,11 +19,65 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "toolset.json"
+DEFAULT_UPSTREAM_DIR = ROOT / "config" / "upstream"
 COMMON_ITEMS = ("Include", "Plugins", "Stubs", "Contrib", "nsisconf.nsh", "COPYING")
 
 
 def load_config(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) -> dict:
+    base = load_config(base_path)
+    upstream = load_config(upstream_path)
+    if upstream_path.stem != upstream.get("upstreamVersion"):
+        raise RuntimeError(f"upstream config filename/version mismatch: {upstream_path}")
+    prefix = f"{upstream['upstreamVersion']}-"
+    if not toolset_version.startswith(prefix):
+        raise RuntimeError(
+            f"toolset version {toolset_version} does not use upstream "
+            f"{upstream['upstreamVersion']}"
+        )
+    local_version = toolset_version[len(prefix):]
+    if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.-]*", local_version):
+        raise RuntimeError(f"invalid local version label: {local_version}")
+    config = {**base, **upstream, "toolsetVersion": toolset_version}
+    return config
+
+
+def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> dict:
+    if not re.fullmatch(r"v[0-9][0-9A-Za-z.-]*-[0-9A-Za-z][0-9A-Za-z.-]*", version):
+        raise RuntimeError(
+            "version must have form v<upstream>-<local>, for example "
+            "v3.12-r1 or v3.12-preview.2"
+        )
+    candidates = []
+    for path in upstream_dir.glob("*.json"):
+        upstream_version = path.stem
+        prefix = f"v{upstream_version}-"
+        if version.startswith(prefix):
+            candidates.append((len(upstream_version), upstream_version, path))
+    if not candidates:
+        raise RuntimeError(f"no registered upstream config matches {version}")
+    _, upstream_version, path = max(candidates)
+    local_version = version[len(upstream_version) + 2:]
+    upstream = load_config(path)
+    if upstream.get("upstreamVersion") != upstream_version:
+        raise RuntimeError(f"upstream config filename/version mismatch: {path}")
+    try:
+        config_output = path.relative_to(ROOT).as_posix()
+    except ValueError:
+        config_output = path.as_posix()
+    return {
+        "tag": version,
+        "toolsetVersion": version[1:],
+        "upstreamVersion": upstream_version,
+        "localVersion": local_version,
+        "upstreamConfig": config_output,
+        "sourceDateEpoch": str(upstream["sourceDateEpoch"]),
+        "windowsArchive": upstream["upstream"]["windowsZip"]["fileName"],
+        "sourceArchive": upstream["upstream"]["sourceArchive"]["fileName"],
+    }
 
 
 def digest(path: Path, algorithm: str) -> str:
@@ -106,26 +161,51 @@ def copy_item(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
-def write_windows_launcher(path: Path) -> None:
-    """Write an optional CLI launcher; API consumers may invoke the binary with NSISDIR."""
-    path.write_text(
+def write_root_launchers(stage: Path) -> None:
+    """Write human-facing dispatchers; API consumers invoke manifest binaries directly."""
+    windows_path = stage / "makensis.cmd"
+    posix_path = stage / "makensis"
+    stage.mkdir(parents=True, exist_ok=True)
+    windows_path.write_text(
         "@echo off\r\nsetlocal\r\n"
-        'set "NSISDIR=%~dp0..\\..\\common"\r\n'
-        '"%~dp0makensis.exe" %*\r\nexit /b %ERRORLEVEL%\r\n',
+        'set "NSISDIR=%~dp0common"\r\n'
+        '"%~dp0hosts\\win-x86\\makensis.exe" %*\r\nexit /b %ERRORLEVEL%\r\n',
         encoding="utf-8",
         newline="",
     )
-
-
-def unix_launcher() -> str:
-    """Return an optional CLI launcher that resolves common/ after relocation."""
-    return """#!/bin/sh
+    posix_path.write_text(
+        """#!/bin/sh
 set -eu
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-NSISDIR=$(CDPATH= cd -- "$SCRIPT_DIR/../../common" && pwd)
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+OS=$(uname -s)
+ARCH=$(uname -m)
+case "$OS:$ARCH" in
+  Linux:x86_64) RID=linux-x64 ;;
+  Linux:aarch64|Linux:arm64) RID=linux-arm64 ;;
+  Darwin:x86_64) RID=osx-x64 ;;
+  Darwin:arm64) RID=osx-arm64 ;;
+  *) echo "unsupported host: $OS/$ARCH" >&2; exit 2 ;;
+esac
+NSISDIR="$ROOT/common"
 export NSISDIR
-exec "$SCRIPT_DIR/makensis.bin" "$@"
-"""
+exec "$ROOT/hosts/$RID/makensis" "$@"
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    posix_path.chmod(0o755)
+
+
+def verify_windows_x86(binary: Path) -> None:
+    data = binary.read_bytes()
+    if data[:2] != b"MZ" or len(data) < 0x40:
+        raise RuntimeError("official Windows compiler is not a PE executable")
+    pe_offset = int.from_bytes(data[0x3C:0x40], "little")
+    if data[pe_offset:pe_offset + 4] != b"PE\0\0":
+        raise RuntimeError("official Windows compiler has an invalid PE header")
+    machine = int.from_bytes(data[pe_offset + 4:pe_offset + 6], "little")
+    if machine != 0x014C:
+        raise RuntimeError(f"official Windows compiler is not x86 (PE machine 0x{machine:04x})")
 
 
 def stage_windows(config: dict, archive: Path, stage: Path, work: Path) -> None:
@@ -143,34 +223,34 @@ def stage_windows(config: dict, archive: Path, stage: Path, work: Path) -> None:
         if not source.exists():
             raise RuntimeError(f"official ZIP lacks required common item: {name}")
         copy_item(source, common / name)
-    host = stage / "hosts" / "win"
+    host = stage / "hosts" / "win-x86"
     host.mkdir(parents=True)
     for name in ("makensis.exe", "zlib1.dll"):
         source = upstream_root / "Bin" / name
         if not source.is_file():
             raise RuntimeError(f"official ZIP lacks required Windows runtime file: Bin/{name}")
         shutil.copy2(source, host / name)
-    write_windows_launcher(host / "makensis.cmd")
+    verify_windows_x86(host / "makensis.exe")
+    write_root_launchers(stage)
     print(f"staged official common data and Windows runtime at {stage}")
 
 
 def stage_host(config: dict, stage: Path, rid: str, binary: Path, metadata: Path | None) -> None:
-    if rid not in config["hosts"] or rid == "win-x64":
+    if rid not in config["hosts"] or rid == "win-x86":
         raise RuntimeError(f"unsupported native host RID: {rid}")
     if not binary.is_file():
         raise RuntimeError(f"missing native compiler: {binary}")
     host = stage / "hosts" / config["hosts"][rid]["directory"]
     host.mkdir(parents=True, exist_ok=True)
-    output = host / "makensis.bin"
+    output = host / "makensis"
     shutil.copy2(binary, output)
     output.chmod(output.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    launcher = host / "makensis"
-    launcher.write_text(unix_launcher(), encoding="utf-8", newline="\n")
-    launcher.chmod(0o755)
     if metadata:
-        metadata_target = stage / "build" / "hosts" / f"{rid}.json"
-        metadata_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(metadata, metadata_target)
+        item = json.loads(metadata.read_text(encoding="utf-8"))
+        if item.get("rid") != rid or item.get("reportedVersion") != f"v{config['upstreamVersion']}":
+            raise RuntimeError(f"version/RID mismatch in build metadata for {rid}")
+        if item.get("sha256") != sha256(output):
+            raise RuntimeError(f"binary hash does not match build metadata for {rid}")
 
 
 def normalized_mode(path: Path, requires_executable: bool = False) -> int:
@@ -191,7 +271,7 @@ def file_record(stage: Path, path: Path, requires_executable: bool = False) -> d
     }
 
 
-def generate_manifest(config: dict, stage: Path, provenance: dict | None = None) -> dict:
+def generate_manifest(config: dict, stage: Path) -> dict:
     for required in (stage / "common" / "Include", stage / "common" / "Plugins", stage / "common" / "Stubs"):
         if not required.is_dir() or not any(required.rglob("*")):
             raise RuntimeError(f"missing or empty required common directory: {required}")
@@ -202,9 +282,8 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
             raise RuntimeError(f"repository build/test file leaked into toolset: {relative.as_posix()}")
     hosts = []
     for rid, spec in config["hosts"].items():
-        for key in ("binary", "convenienceLauncher"):
-            if not (stage / spec[key]).is_file():
-                raise RuntimeError(f"missing {rid} {key}: {spec[key]}")
+        if not (stage / spec["binary"]).is_file():
+            raise RuntimeError(f"missing {rid} binary: {spec['binary']}")
         nsisdir = spec.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath")
         if nsisdir != "common":
             raise RuntimeError(f"{rid} must declare NSISDIR as toolset-relative common")
@@ -212,21 +291,13 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
             p.relative_to(stage).as_posix()
             for p in (stage / "hosts" / spec["directory"]).rglob("*") if p.is_file()
         )
-        if rid != "win-x64":
-            metadata_path = stage / "build" / "hosts" / f"{rid}.json"
-            if not metadata_path.is_file():
-                raise RuntimeError(f"missing build metadata for {rid}")
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            if metadata.get("rid") != rid or metadata.get("reportedVersion") != f"v{config['upstreamVersion']}":
-                raise RuntimeError(f"version/RID mismatch in build metadata for {rid}")
-            if metadata.get("sha256") != sha256(stage / spec["binary"]):
-                raise RuntimeError(f"binary hash does not match build metadata for {rid}")
         hosts.append({"rid": rid, **spec, "runtimeFiles": runtime_files})
+    for launcher in config["launchers"].values():
+        if not (stage / launcher).is_file():
+            raise RuntimeError(f"missing root launcher: {launcher}")
     executable_paths = {
-        spec[key]
-        for spec in config["hosts"].values() if spec["unixExecutable"]
-        for key in ("convenienceLauncher", "binary")
-    }
+        spec["binary"] for spec in config["hosts"].values() if spec["unixExecutable"]
+    } | {config["launchers"]["posix"]}
     files = [
         file_record(stage, p, p.relative_to(stage).as_posix() in executable_paths)
         for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "toolset-manifest.json"
@@ -239,12 +310,11 @@ def generate_manifest(config: dict, stage: Path, provenance: dict | None = None)
         "upstream": config["upstream"],
         "commonRoot": "common",
         "hosts": hosts,
+        "launchers": config["launchers"],
         "files": files,
-        "invocationPolicy": "Resolve the selected host binary and requiredEnvironment paths against the toolset root. Convenience launchers are optional shell-oriented helpers.",
+        "invocationPolicy": "Programs resolve a host binary and requiredEnvironment against the toolset root. Humans may use the root dispatcher.",
         "executablePermissionPolicy": "After ZIP extraction, chmod every file whose requiresExecutable is true to its unixMode before executing it.",
     }
-    if provenance is not None:
-        manifest["provenance"] = provenance
     target = stage / "toolset-manifest.json"
     target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return manifest
@@ -266,10 +336,10 @@ def verify_manifest(stage: Path, repair_modes: bool = False) -> dict:
     for host in manifest["hosts"]:
         if not host["binary"].startswith(f"hosts/{host['directory']}/"):
             raise RuntimeError(f"invalid binary layout for {host['rid']}")
-        if not host["convenienceLauncher"].startswith(f"hosts/{host['directory']}/"):
-            raise RuntimeError(f"invalid launcher layout for {host['rid']}")
         if host.get("requiredEnvironment", {}).get("NSISDIR", {}).get("toolsetRelativePath") != "common":
             raise RuntimeError(f"invalid NSISDIR contract for {host['rid']}")
+    if manifest.get("launchers") != {"windows": "makensis.cmd", "posix": "makensis"}:
+        raise RuntimeError("invalid root launcher contract")
     print(f"verified {len(actual)} files for {manifest['toolsetVersion']}")
     return manifest
 
@@ -303,6 +373,52 @@ def package(config: dict, stage: Path, dist: Path) -> None:
     print(f"created {archive} ({checksum})")
 
 
+def write_build_record(config: dict, stage: Path, source_commit: str) -> dict:
+    record = {
+        "schemaVersion": 1,
+        "toolsetVersion": config["toolsetVersion"],
+        "upstreamVersion": config["upstreamVersion"],
+        "sourceDateEpoch": config["sourceDateEpoch"],
+        "sourceCommit": source_commit,
+        "upstream": config["upstream"],
+        "nativeBuildPolicy": {
+            "patches": [],
+            "constDataPath": False,
+            "commonDataSource": "verified official Windows ZIP",
+        },
+    }
+    target = stage / "build-record.json"
+    target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    return record
+
+
+def write_source_record(config: dict, target: Path) -> None:
+    rows = []
+    for spec in config["upstream"].values():
+        rows.append(
+            f"| `{spec['fileName']}` | <{spec['url']}> | {spec['size']} | "
+            f"`{spec['digests']['upstreamPublished']['sha1']}` | "
+            f"`{spec['digests']['upstreamPublished']['md5']}` | "
+            f"`{spec['digests']['locallyDerived']['sha256']}` |"
+        )
+    text = f"""# Source record
+
+Toolset version: `{config['toolsetVersion']}`
+Upstream NSIS version: `{config['upstreamVersion']}`
+`SOURCE_DATE_EPOCH`: `{config['sourceDateEpoch']}`
+
+| Input | Official URL | Bytes | Upstream SHA-1 | Upstream MD5 | Locally derived SHA-256 |
+| --- | --- | ---: | --- | --- | --- |
+{chr(10).join(rows)}
+
+Downloads are accepted only when byte size, upstream-published SHA-1, and
+locally derived SHA-256 all match. MD5 is recorded but is not an acceptance
+check.
+"""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8", newline="\n")
+
+
 def verify_zip(archive: Path, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
@@ -323,22 +439,40 @@ def safe_extract_zip_flat(archive: Path, destination: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--upstream-config", type=Path)
+    parser.add_argument("--toolset-version")
     commands = parser.add_subparsers(dest="command", required=True)
+    p = commands.add_parser("resolve-version")
+    p.add_argument("--version", required=True)
+    p.add_argument("--upstream-dir", type=Path, default=DEFAULT_UPSTREAM_DIR)
+    p.add_argument("--github-output", type=Path)
     p = commands.add_parser("download"); p.add_argument("--cache", type=Path, required=True)
     p = commands.add_parser("stage-windows"); p.add_argument("--archive", type=Path, required=True); p.add_argument("--stage", type=Path, required=True); p.add_argument("--work", type=Path, required=True)
     p = commands.add_parser("stage-host"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--rid", required=True); p.add_argument("--binary", type=Path, required=True); p.add_argument("--metadata", type=Path)
-    p = commands.add_parser("manifest"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--provenance", type=Path)
+    p = commands.add_parser("build-record"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--source-commit", required=True)
+    p = commands.add_parser("source-record"); p.add_argument("--output", type=Path, required=True)
+    p = commands.add_parser("manifest"); p.add_argument("--stage", type=Path, required=True)
     p = commands.add_parser("verify"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--repair-modes", action="store_true")
     p = commands.add_parser("package"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--dist", type=Path, required=True)
     p = commands.add_parser("verify-zip"); p.add_argument("--archive", type=Path, required=True); p.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args()
-    config = load_config(args.config)
+    if args.command == "resolve-version":
+        resolved = resolve_version(args.version, args.upstream_dir)
+        print(json.dumps(resolved, indent=2, sort_keys=True))
+        if args.github_output:
+            with args.github_output.open("a", encoding="utf-8", newline="\n") as output:
+                for key, value in resolved.items():
+                    output.write(f"{key}={value}\n")
+        return
+    if not args.upstream_config or not args.toolset_version:
+        parser.error("--upstream-config and --toolset-version are required")
+    config = merged_config(args.config, args.upstream_config, args.toolset_version)
     if args.command == "download": download(config, args.cache)
     elif args.command == "stage-windows": stage_windows(config, args.archive, args.stage, args.work)
     elif args.command == "stage-host": stage_host(config, args.stage, args.rid, args.binary, args.metadata)
-    elif args.command == "manifest":
-        provenance = json.loads(args.provenance.read_text(encoding="utf-8")) if args.provenance else None
-        generate_manifest(config, args.stage, provenance)
+    elif args.command == "build-record": write_build_record(config, args.stage, args.source_commit)
+    elif args.command == "source-record": write_source_record(config, args.output)
+    elif args.command == "manifest": generate_manifest(config, args.stage)
     elif args.command == "verify": verify_manifest(args.stage, args.repair_modes)
     elif args.command == "package": package(config, args.stage, args.dist)
     elif args.command == "verify-zip": verify_zip(args.archive, args.destination)

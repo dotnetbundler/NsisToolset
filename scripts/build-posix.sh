@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-  echo "usage: $0 <source-archive> <output-dir> <rid> <source-date-epoch>" >&2
+if [[ $# -ne 5 ]]; then
+  echo "usage: $0 <source-archive> <output-dir> <rid> <source-date-epoch> <upstream-version>" >&2
   exit 2
 fi
 
@@ -10,6 +10,14 @@ archive=$1
 output=$2
 rid=$3
 epoch=$4
+upstream_version=$5
+IFS=. read -r version_major version_minor version_revision version_build version_extra <<<"$upstream_version"
+if [[ -n "${version_extra:-}" || -z "${version_major:-}" || -z "${version_minor:-}" ]]; then
+  echo "unsupported NSIS numeric version: $upstream_version" >&2
+  exit 2
+fi
+version_revision=${version_revision:-0}
+version_build=${version_build:-0}
 work="${RUNNER_TEMP:-/tmp}/nsis-build-${rid}"
 rm -rf "$work"
 mkdir -p "$work/src" "$work/install" "$output"
@@ -19,11 +27,11 @@ export SOURCE_DATE_EPOCH="$epoch"
 common_args=(
   -C "$work/src"
   -j2
-  VERSION=3.12
-  VER_MAJOR=3
-  VER_MINOR=12
-  VER_REVISION=0
-  VER_BUILD=0
+  VERSION="$upstream_version"
+  VER_MAJOR="$version_major"
+  VER_MINOR="$version_minor"
+  VER_REVISION="$version_revision"
+  VER_BUILD="$version_build"
   SOURCE_DATE_EPOCH="$epoch"
   NSIS_CONFIG_CONST_DATA_PATH=no
   PREFIX="$work/install"
@@ -51,17 +59,17 @@ case "$rid" in
   *) echo "unsupported RID: $rid" >&2; exit 2 ;;
 esac
 
-cp "$work/install/makensis" "$output/makensis.bin"
-chmod 0755 "$output/makensis.bin"
+cp "$work/install/makensis" "$output/makensis"
+chmod 0755 "$output/makensis"
 
-"$output/makensis.bin" -VERSION | tee "$output/version.txt"
-grep -Fx "v3.12" "$output/version.txt"
+"$output/makensis" -VERSION | tee "$output/version.txt"
+grep -Fx "v$upstream_version" "$output/version.txt"
 
 case "$rid" in
   linux-*)
-    file "$output/makensis.bin" | tee "$output/file.txt"
-    readelf --notes "$output/makensis.bin" | tee "$output/elf-notes.txt"
-    ldd_output=$(ldd "$output/makensis.bin" 2>&1 || true)
+    file "$output/makensis" | tee "$output/file.txt"
+    readelf --notes "$output/makensis" | tee "$output/elf-notes.txt"
+    ldd_output=$(ldd "$output/makensis" 2>&1 || true)
     printf '%s\n' "$ldd_output" | tee "$output/dependencies.txt"
     if ! grep -Eq 'not a dynamic executable|statically linked' "$output/dependencies.txt"; then
       echo "Linux makensis must be fully static" >&2
@@ -75,8 +83,8 @@ case "$rid" in
     fi
     ;;
   osx-*)
-    file "$output/makensis.bin" | tee "$output/file.txt"
-    otool -L "$output/makensis.bin" | tee "$output/dependencies.txt"
+    file "$output/makensis" | tee "$output/file.txt"
+    otool -L "$output/makensis" | tee "$output/dependencies.txt"
     if tail -n +2 "$output/dependencies.txt" | sed 's/^[[:space:]]*//' | grep -Ev '^(/usr/lib/|/System/Library/)' | grep -q .; then
       echo "macOS makensis has a non-system dynamic dependency" >&2
       exit 1
@@ -85,6 +93,7 @@ case "$rid" in
 esac
 
 python3 "$(cd "$(dirname "$0")" && pwd)/host_metadata.py" \
-  --rid "$rid" --binary "$output/makensis.bin" --version-file "$output/version.txt" \
+  --rid "$rid" --binary "$output/makensis" --version-file "$output/version.txt" \
+  --upstream-version "$upstream_version" --source-date-epoch "$epoch" \
   --file-report "$output/file.txt" --dependencies "$output/dependencies.txt" \
   --output "$output/build-metadata.json"

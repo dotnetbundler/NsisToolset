@@ -12,52 +12,54 @@ import toolset
 
 
 class ToolsetTests(unittest.TestCase):
+    def make_stage(self, root: Path, toolset_version: str = "test-r1"):
+        stage = root / "stage"
+        for name in ("Include", "Plugins", "Stubs"):
+            item = stage / "common" / name
+            item.mkdir(parents=True)
+            (item / "data").write_text(name)
+        (stage / "common" / "Contrib").mkdir()
+        (stage / "common" / "COPYING").write_text("license")
+        (stage / "common" / "nsisconf.nsh").write_text("")
+        config = {
+            "toolsetVersion": toolset_version,
+            "upstreamVersion": "test",
+            "sourceDateEpoch": 1776631488,
+            "upstream": {},
+            "launchers": {"windows": "makensis.cmd", "posix": "makensis"},
+            "hosts": {},
+        }
+        (stage / "makensis.cmd").write_text("launcher")
+        (stage / "makensis").write_text("#!/bin/sh\n")
+        (stage / "makensis").chmod(0o755)
+        hosts = (
+            ("win-x86", "win-x86", "makensis.exe", False, ["win-x86", "win-x64"]),
+            ("linux-x64", "linux-x64", "makensis", True, ["linux-x64"]),
+            ("linux-arm64", "linux-arm64", "makensis", True, ["linux-arm64"]),
+            ("osx-x64", "osx-x64", "makensis", True, ["osx-x64"]),
+            ("osx-arm64", "osx-arm64", "makensis", True, ["osx-arm64"]),
+        )
+        for rid, directory, name, executable, compatible in hosts:
+            binary = stage / "hosts" / directory / name
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"binary")
+            if executable:
+                binary.chmod(0o755)
+            config["hosts"][rid] = {
+                "directory": directory,
+                "binary": binary.relative_to(stage).as_posix(),
+                "architecture": rid.rsplit("-", 1)[-1],
+                "compatibleHostRids": compatible,
+                "requiredEnvironment": {"NSISDIR": {"toolsetRelativePath": "common"}},
+                "unixExecutable": executable,
+                "minimumOs": "test",
+            }
+        return stage, config
+
     def test_zip_is_deterministic_and_permissions_are_repairable(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            stage = root / "stage"
-            for name in ("Include", "Plugins", "Stubs"):
-                (stage / "common" / name).mkdir(parents=True)
-                (stage / "common" / name / "data").write_text(name)
-            (stage / "common" / "Contrib").mkdir()
-            (stage / "common" / "COPYING").write_text("license")
-            (stage / "common" / "nsisconf.nsh").write_text("")
-            config = {
-                "toolsetVersion": "test-r1", "upstreamVersion": "test", "sourceDateEpoch": 1776631488,
-                "upstream": {}, "hosts": {}
-            }
-            hosts = (
-                ("win-x64", "win", True),
-                ("linux-x64", "linux-x64", False),
-                ("linux-arm64", "linux-arm64", False),
-                ("osx-x64", "osx-x64", False),
-                ("osx-arm64", "osx-arm64", False),
-            )
-            for rid, directory, win in hosts:
-                host = stage / "hosts" / directory
-                host.mkdir(parents=True)
-                binary = host / ("makensis.exe" if win else "makensis.bin")
-                binary.write_bytes(b"binary")
-                entry = host / ("makensis.cmd" if win else "makensis")
-                entry.write_text("launcher")
-                if not win:
-                    entry.chmod(0o755); binary.chmod(0o755)
-                config["hosts"][rid] = {
-                    "directory": directory,
-                    "binary": binary.relative_to(stage).as_posix(),
-                    "requiredEnvironment": {"NSISDIR": {"toolsetRelativePath": "common"}},
-                    "convenienceLauncher": entry.relative_to(stage).as_posix(),
-                    "unixExecutable": not win,
-                    "minimumOs": "test",
-                }
-                if not win:
-                    metadata = stage / "build" / "hosts" / f"{rid}.json"
-                    metadata.parent.mkdir(parents=True, exist_ok=True)
-                    metadata.write_text(json.dumps({
-                        "rid": rid,
-                        "reportedVersion": "vtest",
-                        "sha256": toolset.sha256(binary),
-                    }))
+            stage, config = self.make_stage(root)
             toolset.generate_manifest(config, stage)
             first, second = root / "one.zip", root / "two.zip"
             toolset.deterministic_zip(stage, first, config["sourceDateEpoch"])
@@ -67,23 +69,68 @@ class ToolsetTests(unittest.TestCase):
             toolset.safe_extract_zip_flat(first, extracted)
             manifest = toolset.verify_manifest(extracted, repair_modes=True)
             self.assertEqual(5, len(manifest["hosts"]))
-            self.assertTrue(all(host["requiredEnvironment"]["NSISDIR"]["toolsetRelativePath"] == "common" for host in manifest["hosts"]))
-            launcher = next(item for item in manifest["files"] if item["path"] == "hosts/linux-x64/makensis")
-            self.assertTrue(launcher["requiresExecutable"])
-            self.assertEqual("0755", launcher["unixMode"])
+            self.assertEqual("x86", manifest["hosts"][0]["architecture"])
+            self.assertNotIn("convenienceLauncher", manifest["hosts"][0])
+            executable = next(item for item in manifest["files"] if item["path"] == "makensis")
+            self.assertTrue(executable["requiresExecutable"])
             with zipfile.ZipFile(first) as bundle:
-                archived_mode = bundle.getinfo("hosts/linux-x64/makensis").external_attr >> 16
-                self.assertFalse(any(name.endswith(".py") for name in bundle.namelist()))
-            self.assertEqual(0o755, archived_mode)
+                self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
+                self.assertFalse(any(name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
             if os.name != "nt":
-                self.assertTrue((extracted / "hosts/linux-x64/makensis").stat().st_mode & stat.S_IXUSR)
+                self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
+
+    def test_local_labels_produce_distinct_manifests_and_archives(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            hashes = []
+            for label in ("3.12-r1", "3.12-preview.2"):
+                stage, config = self.make_stage(root / label, label)
+                toolset.generate_manifest(config, stage)
+                archive = root / (label + ".zip")
+                toolset.deterministic_zip(stage, archive, config["sourceDateEpoch"])
+                hashes.append(toolset.sha256(archive))
+            self.assertNotEqual(hashes[0], hashes[1])
+
+    def test_version_resolution_uses_longest_registered_upstream(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            configs = Path(temporary)
+            for version in ("3.12", "3.12-preview"):
+                (configs / (version + ".json")).write_text(json.dumps({
+                    "upstreamVersion": version,
+                    "sourceDateEpoch": 1,
+                    "upstream": {
+                        "windowsZip": {"fileName": "win.zip"},
+                        "sourceArchive": {"fileName": "src.tar"},
+                    },
+                }))
+            resolved = toolset.resolve_version("v3.12-preview-r1", configs)
+            self.assertEqual("3.12-preview", resolved["upstreamVersion"])
+            self.assertEqual("r1", resolved["localVersion"])
+            resolved = toolset.resolve_version("v3.12-preview.2", configs)
+            self.assertEqual("3.12", resolved["upstreamVersion"])
+            self.assertEqual("preview.2", resolved["localVersion"])
+
+    def test_invalid_or_unregistered_version_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            configs = Path(temporary)
+            with self.assertRaises(RuntimeError):
+                toolset.resolve_version("v3.12", configs)
+            with self.assertRaises(RuntimeError):
+                toolset.resolve_version("v3.12-../bad", configs)
+            with self.assertRaises(RuntimeError):
+                toolset.resolve_version("release-3.12-r1", configs)
 
     def test_tampering_is_detected(self):
         with tempfile.TemporaryDirectory() as temporary:
             stage = Path(temporary)
             payload = stage / "payload"
             payload.write_text("good")
-            manifest = {"toolsetVersion": "test", "hosts": [], "files": [toolset.file_record(stage, payload)]}
+            manifest = {
+                "toolsetVersion": "test",
+                "launchers": {"windows": "makensis.cmd", "posix": "makensis"},
+                "hosts": [],
+                "files": [toolset.file_record(stage, payload)],
+            }
             (stage / "toolset-manifest.json").write_text(json.dumps(manifest))
             payload.write_text("bad")
             with self.assertRaises(RuntimeError):
@@ -115,16 +162,38 @@ class ToolsetTests(unittest.TestCase):
 
     def test_python_build_script_cannot_leak_into_toolset(self):
         with tempfile.TemporaryDirectory() as temporary:
-            stage = Path(temporary)
-            for name in ("Include", "Plugins", "Stubs"):
-                (stage / "common" / name).mkdir(parents=True)
-                (stage / "common" / name / "data").write_text(name)
+            stage, config = self.make_stage(Path(temporary))
             leaked = stage / "scripts" / "toolset.py"
             leaked.parent.mkdir()
             leaked.write_text("print('leaked')")
-            config = {"toolsetVersion": "test", "upstreamVersion": "test", "sourceDateEpoch": 0, "upstream": {}, "hosts": {}}
             with self.assertRaises(RuntimeError):
                 toolset.generate_manifest(config, stage)
+
+    def test_windows_binary_must_be_x86_pe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "makensis.exe"
+            data = bytearray(128)
+            data[:2] = b"MZ"
+            data[0x3C:0x40] = (64).to_bytes(4, "little")
+            data[64:68] = b"PE\0\0"
+            data[68:70] = (0x8664).to_bytes(2, "little")
+            binary.write_bytes(data)
+            with self.assertRaises(RuntimeError):
+                toolset.verify_windows_x86(binary)
+            data[68:70] = (0x014C).to_bytes(2, "little")
+            binary.write_bytes(data)
+            toolset.verify_windows_x86(binary)
+
+    def test_root_dispatchers_cover_supported_hosts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary)
+            toolset.write_root_launchers(stage)
+            windows = (stage / "makensis.cmd").read_text()
+            posix = (stage / "makensis").read_text()
+            self.assertIn("hosts\\win-x86\\makensis.exe", windows)
+            for value in ("Linux:x86_64", "Linux:aarch64", "Darwin:x86_64", "Darwin:arm64"):
+                self.assertIn(value, posix)
+            self.assertIn("unsupported host", posix)
 
 
 if __name__ == "__main__":

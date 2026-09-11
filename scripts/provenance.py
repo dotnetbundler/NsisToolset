@@ -6,6 +6,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--metadata-root", type=Path, required=True)
+parser.add_argument("--upstream-version", required=True)
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 
@@ -26,7 +27,7 @@ provenance = {
     "event": os.environ.get("GITHUB_EVENT_NAME"),
     "hostBuilds": hosts,
     "windowsHost": {
-        "origin": "Verified official nsis-3.12.zip",
+        "origin": f"Verified official nsis-{args.upstream_version}.zip",
         "compilerPathInUpstream": "Bin/makensis.exe",
         "runtimeDependencyPathsInUpstream": ["Bin/zlib1.dll"],
         "patches": [],
