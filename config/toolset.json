@@ -5,10 +5,10 @@
       "directory": "win-x86",
       "binary": "hosts/win-x86/makensis.exe",
       "architecture": "x86",
-      "compatibleHostRids": ["win-x86", "win-x64"],
+      "compatibleHostRids": ["win-x86", "win-x64", "win-arm64"],
       "requiredEnvironment": { "NSISDIR": { "toolsetRelativePath": "common" } },
       "unixExecutable": false,
-      "minimumOs": "Windows Server 2022 is CI-verified; older support follows the upstream official binary and is not asserted"
+      "minimumOs": "Windows Server 2022 x64 is CI-verified; Windows ARM64 compatibility uses Windows x86 emulation and is not a native ARM64 build"
     },
     "linux-x64": {
       "directory": "linux-x64",

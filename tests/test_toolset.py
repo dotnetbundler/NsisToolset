@@ -36,7 +36,7 @@ class ToolsetTests(unittest.TestCase):
         (stage / "makensis").write_text("#!/bin/sh\n")
         (stage / "makensis").chmod(0o755)
         hosts = (
-            ("win-x86", "win-x86", "makensis.exe", False, ["win-x86", "win-x64"]),
+            ("win-x86", "win-x86", "makensis.exe", False, ["win-x86", "win-x64", "win-arm64"]),
             ("linux-x64", "linux-x64", "makensis", True, ["linux-x64"]),
             ("linux-arm64", "linux-arm64", "makensis", True, ["linux-arm64"]),
             ("osx-x64", "osx-x64", "makensis", True, ["osx-x64"]),
@@ -73,6 +73,7 @@ class ToolsetTests(unittest.TestCase):
             manifest = toolset.verify_manifest(extracted, repair_modes=True)
             self.assertEqual(5, len(manifest["hosts"]))
             self.assertEqual("x86", manifest["hosts"][0]["architecture"])
+            self.assertIn("win-arm64", manifest["hosts"][0]["compatibleHostRids"])
             self.assertNotIn("convenienceLauncher", manifest["hosts"][0])
             executable = next(item for item in manifest["files"] if item["path"] == "makensis")
             self.assertTrue(executable["requiresExecutable"])

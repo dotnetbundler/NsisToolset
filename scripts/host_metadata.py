@@ -8,6 +8,17 @@ import subprocess
 from pathlib import Path
 
 
+class Arguments(argparse.Namespace):
+    rid: str
+    binary: Path
+    version_file: Path
+    file_report: Path
+    dependencies: Path
+    upstream_version: str
+    source_date_epoch: str
+    output: Path
+
+
 def text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace").strip()
 
@@ -57,8 +68,17 @@ def main() -> None:
     parser.add_argument("--upstream-version", required=True)
     parser.add_argument("--source-date-epoch", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    write_metadata(**vars(args))
+    args = parser.parse_args(namespace=Arguments())
+    write_metadata(
+        rid=args.rid,
+        binary=args.binary,
+        version_file=args.version_file,
+        file_report=args.file_report,
+        dependencies=args.dependencies,
+        upstream_version=args.upstream_version,
+        source_date_epoch=args.source_date_epoch,
+        output=args.output,
+    )
 
 
 if __name__ == "__main__":

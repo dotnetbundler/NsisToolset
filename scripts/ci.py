@@ -24,6 +24,30 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "toolset.json"
 
 
+class Arguments(argparse.Namespace):
+    config: Path
+    upstream_config: Path | None
+    toolset_version: str | None
+    command: str
+    archive: Path
+    stage: Path
+    work: Path
+    fixture: Path
+    smoke: Path
+    rid: str
+    first: Path
+    second: Path
+    binary: Path
+    metadata: Path
+    hosts: Path
+    artifacts: Path
+    source_commit: str
+    destination: Path
+    installers: Path
+    expected_count: int
+    dist: Path
+
+
 def run(command: list[str | Path], *, cwd: Path | None = None, env: dict[str, str] | None = None,
         capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
     normalized = [str(item) for item in command]
@@ -287,7 +311,7 @@ def main() -> None:
     p.add_argument("--installers", type=Path, required=True); p.add_argument("--expected-count", type=int, default=5)
     p = commands.add_parser("publish")
     p.add_argument("--dist", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Arguments())
 
     if args.command == "install-uninstall":
         install_uninstall(args.installers, args.expected_count)

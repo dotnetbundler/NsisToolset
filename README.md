@@ -33,7 +33,7 @@ toolset-manifest.json
 
 `common/` is copied from the matching official standard ZIP and is not duplicated per host. `Plugins` contains Windows installer plug-ins used in generated installers; it is target data, not a host dependency.
 
-Every file is inventoried with path, SHA-256, size, normalized Unix mode, and executable requirement. Every host record contains its RID, architecture, compatible host RIDs, real binary, required environment, runtime files, and minimum-OS statement. The official Windows compiler is PE x86 and is named `win-x86`; compatibility with x64 Windows is recorded separately. ZIP readers do not consistently restore executable bits, so a consumer must restore declared executable modes.
+Every file is inventoried with path, SHA-256, size, normalized Unix mode, and executable requirement. Every host record contains its RID, architecture, compatible host RIDs, real binary, required environment, runtime files, and minimum-OS statement. The official Windows compiler is PE x86 and is named `win-x86`; compatibility with x64 and ARM64 Windows is recorded separately, with ARM64 running it through Windows x86 emulation rather than as a native ARM64 binary. ZIP readers do not consistently restore executable bits, so a consumer must restore declared executable modes.
 
 ## Build and verification
 

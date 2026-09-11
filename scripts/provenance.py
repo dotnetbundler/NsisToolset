@@ -4,6 +4,12 @@ import json
 import os
 from pathlib import Path
 
+
+class Arguments(argparse.Namespace):
+    metadata_root: Path
+    upstream_version: str
+    output: Path
+
 def write_provenance(metadata_root: Path, upstream_version: str, output: Path) -> dict:
     hosts = {}
     for path in sorted(metadata_root.rglob("build-metadata.json")):
@@ -38,7 +44,7 @@ def main() -> None:
     parser.add_argument("--metadata-root", type=Path, required=True)
     parser.add_argument("--upstream-version", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Arguments())
     write_provenance(args.metadata_root, args.upstream_version, args.output)
 
 

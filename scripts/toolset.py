@@ -20,7 +20,29 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "toolset.json"
 DEFAULT_UPSTREAM_DIR = ROOT / "config" / "upstream"
-COMMON_ITEMS = ("Include", "Plugins", "Stubs", "Contrib", "nsisconf.nsh", "COPYING")
+COMMON_ITEMS = ("Contrib", "Include", "Plugins", "Stubs", "nsisconf.nsh", "COPYING")
+
+
+class Arguments(argparse.Namespace):
+    config: Path
+    upstream_config: Path | None
+    toolset_version: str | None
+    command: str
+    version: str
+    upstream_dir: Path
+    github_output: Path | None
+    cache: Path
+    archive: Path
+    stage: Path
+    work: Path
+    rid: str
+    binary: Path
+    metadata: Path | None
+    source_commit: str
+    output: Path
+    repair_modes: bool
+    dist: Path
+    destination: Path
 
 
 def load_config(path: Path) -> dict:
@@ -45,12 +67,9 @@ def merged_config(base_path: Path, upstream_path: Path, toolset_version: str) ->
     return config
 
 
-def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> dict:
+def resolve_version(version: str, upstream_dir: Path = DEFAULT_UPSTREAM_DIR) -> dict[str, str]:
     if not re.fullmatch(r"v[0-9][0-9A-Za-z.-]*-[0-9A-Za-z][0-9A-Za-z.-]*", version):
-        raise RuntimeError(
-            "version must have form v<upstream>-<local>, for example "
-            "v3.12-r1 or v3.12-preview.2"
-        )
+        raise RuntimeError("version must have form v<upstream>-<local>, for example v3.12-r1 or v3.12-preview.2")
     candidates = []
     for path in upstream_dir.glob("*.json"):
         upstream_version = path.stem
@@ -436,37 +455,70 @@ def safe_extract_zip_flat(archive: Path, destination: Path) -> None:
         bundle.extractall(destination)
 
 
+def resolve_version_command(version: str, upstream_dir: Path, github_output: Path | None) -> None:
+    resolved = resolve_version(version, upstream_dir)
+    print(json.dumps(resolved, indent=2, sort_keys=True))
+    if github_output is not None:
+        with github_output.open("a", encoding="utf-8", newline="\n") as output:
+            for key, value in resolved.items():
+                output.write(f"{key}={value}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--upstream-config", type=Path)
     parser.add_argument("--toolset-version")
     commands = parser.add_subparsers(dest="command", required=True)
+    # Subcommand: resolve-version
     p = commands.add_parser("resolve-version")
     p.add_argument("--version", required=True)
     p.add_argument("--upstream-dir", type=Path, default=DEFAULT_UPSTREAM_DIR)
     p.add_argument("--github-output", type=Path)
-    p = commands.add_parser("download"); p.add_argument("--cache", type=Path, required=True)
-    p = commands.add_parser("stage-windows"); p.add_argument("--archive", type=Path, required=True); p.add_argument("--stage", type=Path, required=True); p.add_argument("--work", type=Path, required=True)
-    p = commands.add_parser("stage-host"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--rid", required=True); p.add_argument("--binary", type=Path, required=True); p.add_argument("--metadata", type=Path)
-    p = commands.add_parser("build-record"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--source-commit", required=True)
-    p = commands.add_parser("source-record"); p.add_argument("--output", type=Path, required=True)
-    p = commands.add_parser("manifest"); p.add_argument("--stage", type=Path, required=True)
-    p = commands.add_parser("verify"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--repair-modes", action="store_true")
-    p = commands.add_parser("package"); p.add_argument("--stage", type=Path, required=True); p.add_argument("--dist", type=Path, required=True)
-    p = commands.add_parser("verify-zip"); p.add_argument("--archive", type=Path, required=True); p.add_argument("--destination", type=Path, required=True)
-    args = parser.parse_args()
-    if args.command == "resolve-version":
-        resolved = resolve_version(args.version, args.upstream_dir)
-        print(json.dumps(resolved, indent=2, sort_keys=True))
-        if args.github_output:
-            with args.github_output.open("a", encoding="utf-8", newline="\n") as output:
-                for key, value in resolved.items():
-                    output.write(f"{key}={value}\n")
-        return
-    if not args.upstream_config or not args.toolset_version:
-        parser.error("--upstream-config and --toolset-version are required")
+    # Subcommand: download
+    p = commands.add_parser("download")
+    p.add_argument("--cache", type=Path, required=True)
+    # Subcommand: stage-windows
+    p = commands.add_parser("stage-windows")
+    p.add_argument("--archive", type=Path, required=True)
+    p.add_argument("--stage", type=Path, required=True)
+    p.add_argument("--work", type=Path, required=True)
+    # Subcommand: stage-host
+    p = commands.add_parser("stage-host")
+    p.add_argument("--stage", type=Path, required=True)
+    p.add_argument("--rid", required=True)
+    p.add_argument("--binary", type=Path, required=True)
+    p.add_argument("--metadata", type=Path)
+    # Subcommand: build-record
+    p = commands.add_parser("build-record")
+    p.add_argument("--stage", type=Path, required=True)
+    p.add_argument("--source-commit", required=True)
+    # Subcommand: source-record
+    p = commands.add_parser("source-record")
+    p.add_argument("--output", type=Path, required=True)
+    # Subcommand: manifest
+    p = commands.add_parser("manifest")
+    p.add_argument("--stage", type=Path, required=True)
+    # Subcommand: verify
+    p = commands.add_parser("verify")
+    p.add_argument("--stage", type=Path, required=True)
+    p.add_argument("--repair-modes", action="store_true")
+    # Subcommand: package
+    p = commands.add_parser("package")
+    p.add_argument("--stage", type=Path, required=True)
+    p.add_argument("--dist", type=Path, required=True)
+    # Subcommand: verify-zip
+    p = commands.add_parser("verify-zip")
+    p.add_argument("--archive", type=Path, required=True)
+    p.add_argument("--destination", type=Path, required=True)
+    args = parser.parse_args(namespace=Arguments())
+
+    # resolve-version subcommand
+    if args.command == "resolve-version": return resolve_version_command(args.version, args.upstream_dir, args.github_output)
+    # Validate required arguments for other subcommands
+    if not args.upstream_config or not args.toolset_version: parser.error("--upstream-config and --toolset-version are required")
     config = merged_config(args.config, args.upstream_config, args.toolset_version)
+    # Dispatch subcommands
     if args.command == "download": download(config, args.cache)
     elif args.command == "stage-windows": stage_windows(config, args.archive, args.stage, args.work)
     elif args.command == "stage-host": stage_host(config, args.stage, args.rid, args.binary, args.metadata)

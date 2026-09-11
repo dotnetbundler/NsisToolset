@@ -33,7 +33,7 @@ toolset-manifest.json
 
 `common/` 来自完全匹配版本的官方标准 ZIP，不按宿主重复。`Plugins` 是生成 Windows 安装器时使用的目标数据，不是当前构建宿主的动态依赖。
 
-Manifest 为每个文件记录路径、SHA-256、大小、标准 Unix mode 和是否必须可执行；为每个宿主记录 RID、架构、兼容宿主 RID、真实二进制、必需环境变量、运行集文件及最低系统说明。官方 Windows 编译器实际是 PE x86，因此命名为 `win-x86`；对 x64 Windows 的兼容性单独记录。ZIP 解压后应恢复 Manifest 声明的可执行权限。
+Manifest 为每个文件记录路径、SHA-256、大小、标准 Unix mode 和是否必须可执行；为每个宿主记录 RID、架构、兼容宿主 RID、真实二进制、必需环境变量、运行集文件及最低系统说明。官方 Windows 编译器实际是 PE x86，因此命名为 `win-x86`；对 x64 和 ARM64 Windows 的兼容性单独记录，其中 ARM64 通过 Windows x86 仿真运行，并非原生 ARM64 二进制。ZIP 解压后应恢复 Manifest 声明的可执行权限。
 
 ## 构建与验收
 
