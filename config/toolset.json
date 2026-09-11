@@ -1,0 +1,26 @@
+{
+  "toolsetVersion": "3.12-r1",
+  "upstreamVersion": "3.12",
+  "sourceDateEpoch": 1776631488,
+  "upstream": {
+    "windowsZip": {
+      "fileName": "nsis-3.12.zip",
+      "url": "https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download",
+      "sha256": "56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f",
+      "size": 2362938
+    },
+    "sourceArchive": {
+      "fileName": "nsis-3.12-src.tar.bz2",
+      "url": "https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12-src.tar.bz2/download",
+      "sha256": "f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186",
+      "size": 1818389
+    }
+  },
+  "hosts": {
+    "win-x64": { "directory": "win", "entryPoint": "hosts/win/makensis.cmd", "binary": "hosts/win/makensis.exe", "executable": false, "minimumOs": "Windows Server 2022 is CI-verified; older support follows the upstream official binary and is not asserted" },
+    "linux-x64": { "directory": "linux-x64", "entryPoint": "hosts/linux-x64/makensis", "binary": "hosts/linux-x64/makensis.bin", "executable": true, "minimumOs": "Linux kernel 3.2 target baseline; no glibc runtime dependency; CI-verified on Ubuntu 24.04" },
+    "linux-arm64": { "directory": "linux-arm64", "entryPoint": "hosts/linux-arm64/makensis", "binary": "hosts/linux-arm64/makensis.bin", "executable": true, "minimumOs": "Linux kernel 3.7 target baseline; no glibc runtime dependency; CI-verified on Ubuntu 24.04 ARM64" },
+    "osx-x64": { "directory": "osx-x64", "entryPoint": "hosts/osx-x64/makensis", "binary": "hosts/osx-x64/makensis.bin", "executable": true, "minimumOs": "macOS 10.13" },
+    "osx-arm64": { "directory": "osx-arm64", "entryPoint": "hosts/osx-arm64/makensis", "binary": "hosts/osx-arm64/makensis.bin", "executable": true, "minimumOs": "macOS 11.0" }
+  }
+}
