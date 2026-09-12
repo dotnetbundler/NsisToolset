@@ -8,6 +8,7 @@ on:
       toolset-version:
         description: 'For example v3.12-r1 or v3.12-preview.2'
         required: true
+        default: 'v3.12-test'
         type: string
 
 permissions:
