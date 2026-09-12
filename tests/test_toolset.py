@@ -390,8 +390,6 @@ class ToolsetTests(unittest.TestCase):
         ci_commands = set(create_ci_parser()._subparsers._group_actions[0].choices)
         self.assertEqual({"resolve-version", "download", "stage-common", "stage-windows-host"}, toolset_commands)
         self.assertEqual({"windows-smoke", "native-build-twice", "native-smoke", "assemble", "release-package-smoke", "test-installer", "publish"}, ci_commands)
-        self.assertNotIn("relocated-smoke", ci_commands)
-        self.assertNotIn("windows-stage-smoke", ci_commands)
 
     def test_workflow_python_commands_match_cli_parsers(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -404,16 +402,24 @@ class ToolsetTests(unittest.TestCase):
             with self.subTest(command=command):
                 parser.parse_args(tokens[3:])
 
-    def test_workflow_limits_native_canary_scope(self):
+    def test_workflow_runs_all_host_and_installer_smoke_jobs(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        native_job = workflow.split("  native-hosts:", 1)[1].split("\n  install-test:", 1)[0]
+        native_job = workflow.split("  native-hosts-smoke:", 1)[1].split("\n  installer-smoke:", 1)[0]
         matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^ }]+) \}", native_job)
-        self.assertEqual([("linux-x64", "ubuntu-24.04")], matrix)
-        install_job = workflow.split("  install-test:", 1)[1].split("\n  assemble:", 1)[0]
+        self.assertEqual(
+            [
+                ("linux-x64", "ubuntu-24.04"),
+                ("linux-arm64", "ubuntu-24.04-arm"),
+                ("osx-x64", "macos-15-intel"),
+                ("osx-arm64", "macos-15"),
+            ],
+            matrix,
+        )
+        install_job = workflow.split("  installer-smoke:", 1)[1].split("\n  assemble:", 1)[0]
         installers = re.findall(r"--installer artifacts/installers/installer-([^/]+)/", install_job)
-        self.assertEqual(["win-x86", "linux-x64"], installers)
+        self.assertEqual(["win-x86", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"], installers)
         assemble_job = workflow.split("  assemble:", 1)[1].split("\n  release:", 1)[0]
-        self.assertIn("    if: ${{ false }}", assemble_job)
+        self.assertNotIn("    if: ${{ false }}", assemble_job)
 
 
 if __name__ == "__main__":

@@ -58,8 +58,9 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Stage common data and validate the official Windows x86 compiler.
-  windows-host:
+  # Stage common data, validate the Windows host, and smoke-test its launcher.
+  common-and-windows-host-smoke:
+    name: Common data + Windows host smoke
     needs: [resolve, download]
     runs-on: windows-2022
     steps:
@@ -91,14 +92,17 @@ jobs:
           retention-days: 2
 
   # Build and smoke-test each native Linux and macOS compiler.
-  native-hosts:
-    needs: [resolve, download, windows-host]
+  native-hosts-smoke:
+    name: Native host smoke (${{ matrix.rid }})
+    needs: [resolve, download, common-and-windows-host-smoke]
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Keep one canary enabled until the native build passes end-to-end.
           - { rid: linux-x64, os: ubuntu-24.04 }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: osx-x64, os: macos-15-intel }
+          - { rid: osx-arm64, os: macos-15 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -136,8 +140,9 @@ jobs:
           retention-days: 2
 
   # Install and uninstall every host-generated smoke installer on Windows.
-  install-test:
-    needs: [windows-host, native-hosts]
+  installer-smoke:
+    name: Installer smoke
+    needs: [common-and-windows-host-smoke, native-hosts-smoke]
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7.0.1
@@ -152,13 +157,16 @@ jobs:
         run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-win-x86/smoke-installer.exe --install-root artifacts/installed/win-x86
       - name: Install, verify, and uninstall the Linux x64 smoke package
         run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-linux-x64/smoke-installer.exe --install-root artifacts/installed/linux-x64
+      - name: Install, verify, and uninstall the Linux ARM64 smoke package
+        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-linux-arm64/smoke-installer.exe --install-root artifacts/installed/linux-arm64
+      - name: Install, verify, and uninstall the macOS x64 smoke package
+        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-osx-x64/smoke-installer.exe --install-root artifacts/installed/osx-x64
+      - name: Install, verify, and uninstall the macOS ARM64 smoke package
+        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-osx-arm64/smoke-installer.exe --install-root artifacts/installed/osx-arm64
 
   # Assemble and validate reproducible release assets on Linux.
   assemble:
-    # A complete package requires every native host. Re-enable this together
-    # with the full native matrix after the Linux x64 canary passes.
-    if: ${{ false }}
-    needs: [resolve, windows-host, native-hosts, install-test]
+    needs: [resolve, common-and-windows-host-smoke, native-hosts-smoke, installer-smoke]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
