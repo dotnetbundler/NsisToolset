@@ -2,40 +2,69 @@
 
 [简体中文](README.zh-CN.md)
 
-NsisToolset packages NSIS as a versioned, relocatable toolset for Windows,
-Linux, and macOS build hosts. No system-wide NSIS installation is required.
+NsisToolset packages NSIS as a portable toolset for Windows, Linux, and macOS. Download and extract it to use NSIS without installation.
 
 ## Use
 
-Download the versioned ZIP and `.sha256` file from the matching GitHub Release.
-Verify the checksum, extract the ZIP, and run the root launcher:
+Download `nsis-toolset-<version>.zip` from the matching [GitHub Release](https://github.com/dotnetbundler/NsisToolset/releases).
+
+### Verification (optional)
+
+Download the `.sha256` file to verify the ZIP.
+
+Windows:
+
+```powershell
+$version = '<version>'
+$expected = (Get-Content "nsis-toolset-$version.zip.sha256").Split()[0]
+$actual = (Get-FileHash "nsis-toolset-$version.zip" -Algorithm SHA256).Hash
+if ($actual -ne $expected) { throw 'checksum mismatch' }
+```
+
+Linux:
+
+```sh
+sha256sum --check nsis-toolset-<version>.zip.sha256
+```
+
+macOS:
+
+```sh
+shasum -a 256 --check nsis-toolset-<version>.zip.sha256
+```
+
+### Run
+
+Windows:
 
 ```powershell
 .\makensis.cmd path\to\installer.nsi
 ```
 
+Linux or macOS:
+
 ```sh
-# Run this only if the extractor did not preserve executable permissions.
-chmod +x makensis hosts/*/makensis
 ./makensis path/to/installer.nsi
 ```
 
-The launcher selects the correct host compiler and configures `NSISDIR`.
-See the [consumer guide](docs/consumer-guide.md) for checksum commands.
+The launcher automatically selects the compiler for the current host and configures `NSISDIR`.
 
-## Documentation
+### FAQ
 
-- [Consumer guide](docs/consumer-guide.md)
-- [Build and release](docs/build-and-release.md)
-- [Register an upstream release](docs/upstream-registration.md)
-- [Source and build policy](docs/source-and-build.md)
+#### Permission denied on Linux or macOS
 
-Run tests with:
+If the extraction tool did not preserve executable permissions, run:
 
-```powershell
-$env:PYTHONDONTWRITEBYTECODE = '1'
-python -m unittest discover -s tests -v
+```sh
+chmod +x makensis hosts/*/makensis
 ```
 
-Repository automation is MIT-licensed. The NSIS license is included at
-`common/COPYING` in every toolset archive.
+## Release process
+
+1. Register the config by following [Register an upstream release](docs/upstream-registration.md); skip this step if the release version already has a config.
+2. (Optional) Run the local tests: `python -m unittest discover -s tests -v`
+3. Push a tag in the `v<upstream-version>-<local-label>` format (for example, `v3.12-r1`), and the workflow will publish the Release automatically.
+
+## License
+
+Repository automation uses the [MIT License](LICENSE). The [NSIS license](https://nsis.sourceforge.io/Docs/AppendixI.html) is included as `common/COPYING`.

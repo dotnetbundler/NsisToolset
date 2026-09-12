@@ -2,40 +2,69 @@
 
 [English](README.md)
 
-NsisToolset 将 NSIS 打包为带版本、可重定位的 Windows、Linux 和 macOS
-构建工具集，无需在系统中安装 NSIS。
+NsisToolset 将 NSIS 打包为便携式 Windows、Linux 和 macOS 工具集。下载并解压后即可使用，无需安装 NSIS。
 
 ## 使用
 
-从对应的 GitHub Release 下载带版本的 ZIP 和 `.sha256` 文件。校验哈希、
-解压，然后运行根启动器：
+从对应的 [GitHub Release](https://github.com/dotnetbundler/NsisToolset/releases) 下载 `nsis-toolset-<version>.zip`。
+
+### 校验(可选)
+
+下载 `.sha256` 文件用于校验。
+
+Windows：
+
+```powershell
+$version = '<version>'
+$expected = (Get-Content "nsis-toolset-$version.zip.sha256").Split()[0]
+$actual = (Get-FileHash "nsis-toolset-$version.zip" -Algorithm SHA256).Hash
+if ($actual -ne $expected) { throw 'checksum mismatch' }
+```
+
+Linux：
+
+```sh
+sha256sum --check nsis-toolset-<version>.zip.sha256
+```
+
+macOS：
+
+```sh
+shasum -a 256 --check nsis-toolset-<version>.zip.sha256
+```
+
+### 运行
+
+Windows：
 
 ```powershell
 .\makensis.cmd path\to\installer.nsi
 ```
 
+Linux 或 macOS：
+
 ```sh
-# 仅当解压工具未保留执行权限时运行。
-chmod +x makensis hosts/*/makensis
 ./makensis path/to/installer.nsi
 ```
 
-启动器会自动选择当前宿主的编译器并配置 `NSISDIR`。校验命令见
-[消费者指南](docs/consumer-guide.md)。
+启动器会自动选择当前宿主的编译器并配置 `NSISDIR`。
 
-## 文档
+### 常见问题
 
-- [消费者指南](docs/consumer-guide.md)
-- [构建与发布](docs/build-and-release.md)
-- [登记上游版本](docs/upstream-registration.md)
-- [来源与构建策略](docs/source-and-build.md)
+#### Linux 或 macOS 提示权限不足
 
-运行测试：
+如果解压工具没有保留执行权限，运行：
 
-```powershell
-$env:PYTHONDONTWRITEBYTECODE = '1'
-python -m unittest discover -s tests -v
+```sh
+chmod +x makensis hosts/*/makensis
 ```
 
-仓库自动化采用 MIT 许可。每个工具集归档都在 `common/COPYING` 中包含
-NSIS 许可证。
+## 发布流程
+
+1. 按照 [登记上游版本](docs/upstream-registration.md) 登记配置，如发布版本已有配置则无需重新登记。
+2. (可选)本地测试：`python -m unittest discover -s tests -v`
+3. 推送 `v<upstream-version>-<local-label>`（如 `v3.12-r1`） 格式的标签，工作流会自动发布 Release。
+
+## 许可证
+
+仓库自动化采用 [MIT 许可证](LICENSE)。[NSIS 许可证](https://nsis.sourceforge.io/Docs/AppendixI.html) 随包放在 `common/COPYING`。
