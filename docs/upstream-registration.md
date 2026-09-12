@@ -46,10 +46,10 @@ For example, pass `2026-04-19 20:44:48 UTC` to produce the JSON value
 
 ## Run the tool
 
-Windows Command Prompt:
+Windows PowerShell 5.1 or later:
 
-```bat
-tools\register-upstream.cmd VERSION "SOURCE_DATE_EPOCH" WINDOWS_SHA1 WINDOWS_MD5 SOURCE_SHA1 SOURCE_MD5
+```powershell
+.\tools\register-upstream.ps1 VERSION "SOURCE_DATE_EPOCH" WINDOWS_SHA1 WINDOWS_MD5 SOURCE_SHA1 SOURCE_MD5
 ```
 
 Linux or macOS:
@@ -62,13 +62,19 @@ The tool downloads both archives, verifies the supplied SHA-1 and MD5 values,
 calculates SHA-256 and sizes, and writes `config/upstream/<version>.json`. It
 refuses to overwrite an existing config.
 
-Downloads are deleted by default. To keep them:
+Downloads are deleted by default. To keep them on Linux or macOS:
 
 ```text
 --keep-downloads [directory]
 ```
 
-Without a directory, files are kept under `.cache/upstream/<version>`.
+On Windows PowerShell, use:
+
+```text
+-KeepDownloads [-DownloadDirectory <directory>]
+```
+
+Without a directory, both scripts keep files under `.cache/upstream/<version>`.
 
 ## Review
 
