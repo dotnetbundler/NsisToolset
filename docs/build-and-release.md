@@ -68,3 +68,64 @@ the resulting archives and metadata.
 
 To add another NSIS version, follow
 [upstream-registration.md](upstream-registration.md).
+
+## Publish a version
+
+### 1. Prepare the version
+
+Choose a tag such as `v3.12-r1`.
+
+- For a new upstream NSIS version, register and commit its
+  `config/upstream/<version>.json` first.
+- For another local revision of an existing upstream version, reuse its config.
+- Update release-specific documentation when the upstream version or build
+  facts change.
+
+Confirm that the tag resolves correctly:
+
+```powershell
+$tag = 'v3.12-r1'
+python -m build_tools.toolset_cli resolve-version --version $tag
+```
+
+### 2. Validate and push the commit
+
+Run the local checks above. Commit all intended changes, make sure the working
+tree is clean, and push the commit that will be released:
+
+```powershell
+git status --short
+git push origin main
+```
+
+For a full pre-release check, manually run the `build-and-verify` workflow with
+the same tag value, such as `v3.12-r1`. Manual dispatch builds and tests all
+hosts but does not publish a Release. Wait for every job to pass.
+
+### 3. Create and push the tag
+
+Tag the exact commit that passed review and validation:
+
+```powershell
+git tag -a $tag -m "NSIS Toolset $tag"
+git push origin $tag
+```
+
+Pushing the tag starts the workflow again. After all validation jobs pass, the
+`release` job creates the GitHub Release.
+
+### 4. Check the Release
+
+Confirm that the Release tag and title are correct and that it contains:
+
+```text
+nsis-toolset-<version>.zip
+nsis-toolset-<version>.zip.sha256
+toolset-manifest.json
+build-provenance.json
+source-record.md
+```
+
+Download the ZIP and `.sha256` file and verify the checksum once. Do not replace
+an existing published tag or its assets. Publish fixes with a new local label,
+for example `v3.12-r2`.
