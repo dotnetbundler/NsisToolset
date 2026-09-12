@@ -1,96 +1,67 @@
 # NsisToolset
 
-NsisToolset 是一个独立、通用的完整 NSIS 跨宿主工具集生产与发行项目。任何构建工具、框架、CI 系统或个人都可以下载带版本的 Release，校验 Manifest，选择对应宿主运行集并使用，无需安装 NSIS。本仓库不包含任何下游产品或 Bundler 的业务逻辑。
+[English](README.md)
 
-当前工具集版本：**`3.12-r1`**（上游 `3.12`，我们的包装修订 `r1`）。
+NsisToolset 为 Windows、Linux 和 macOS 构建宿主生成带版本、可重定位的
+NSIS 工具集。工具集包含共享的 NSIS 安装器数据、各受支持宿主的编译器运行集、
+根启动器，以及机器可读的完整性和宿主元数据。消费者不需要在系统中安装 NSIS。
 
-## 已修正的方案前提
+当前工具集版本：**`3.12-r1`**（上游 NSIS `3.12`，本地标签 `r1`）。
 
-`NSIS_CONFIG_CONST_DATA_PATH=no` 不能自动发现独立放置的顶层 `common/`。因此每个宿主记录都明确声明真实 `binary` 和必需的 `NSISDIR=common` 环境契约。
+## 支持的宿主
 
-程序化消费者应把 `binary` 和 `requiredEnvironment` 相对于解压后的工具集根目录解析，然后直接启动二进制。命令行用户可在 Windows 运行根目录 `makensis.cmd`，在 Linux/macOS 运行根目录 `makensis`；后者根据 `uname` 选择宿主，未知系统或架构会明确失败。
+| 工具集 RID | 构建宿主 | 编译器 |
+| --- | --- | --- |
+| `win-x86` | Windows x86、x64，或通过 x86 兼容能力运行的 ARM64 | 上游官方 PE x86 编译器 |
+| `linux-x64` | Linux x64 | 原生静态编译器 |
+| `linux-arm64` | Linux ARM64 | 原生静态编译器 |
+| `osx-x64` | macOS Intel | 原生编译器 |
+| `osx-arm64` | macOS Apple Silicon | 原生编译器 |
 
-官方 Windows ZIP 中有两个 `makensis.exe`：根目录约 2.5 KiB 的文件只是启动器；真正运行集是 `Bin/makensis.exe` 和它依赖的 `Bin/zlib1.dll`。Linux 编译器要求完全静态链接；macOS 仅允许 Apple 系统动态库。CI 会实际检查这些约束。
+Windows ARM64 支持依赖 Windows x86 仿真，并不是原生 ARM64 编译器。
 
-## 产物结构
+## 快速开始
 
-```text
-makensis
-makensis.cmd
-common/
-  Include/ Plugins/ Stubs/ Contrib/
-  nsisconf.nsh COPYING
-hosts/
-  win-x86/      makensis.exe zlib1.dll
-  linux-x64/    makensis
-  linux-arm64/  makensis
-  osx-x64/      makensis
-  osx-arm64/    makensis
-build-record.json
-SOURCE-RECORD.md
-toolset-manifest.json
-```
-
-`common/` 来自完全匹配版本的官方标准 ZIP，不按宿主重复。`Plugins` 是生成 Windows 安装器时使用的目标数据，不是当前构建宿主的动态依赖。
-
-Manifest 为每个文件记录路径、SHA-256、大小、标准 Unix mode 和是否必须可执行；为每个宿主记录 RID、架构、兼容宿主 RID、真实二进制、必需环境变量、运行集文件及最低系统说明。官方 Windows 编译器实际是 PE x86，因此命名为 `win-x86`；对 x64 和 ARM64 Windows 的兼容性单独记录，其中 ARM64 通过 Windows x86 仿真运行，并非原生 ARM64 二进制。ZIP 解压后应恢复 Manifest 声明的可执行权限。
-
-## 构建与验收
-
-CI 使用真正的 Ubuntu 24.04 x64/arm64、macOS 15 Intel/Apple Silicon 和 Windows Server 2022 runner。原生编译器从官方源码执行 `install-compiler`，跳过 stubs、plugins、utils、misc 和 docs；公共数据始终来自完全匹配的官方 Windows ZIP。
-
-每个原生编译器在同一 runner 构建两次并要求字节相同，随后检查动态选择的上游版本，并通过包根目录启动器编译最小 fixture。Windows job 接着逐一实际运行五个宿主生成的安装器，检查安装标记，运行卸载器并确认清理完成。只有该验收通过后，Ubuntu 才组装 Release，并检查完整文件集合、哈希、版本、权限策略、宿主元数据、两次打包的 ZIP 字节一致性，以及在含空格的新路径中的重定位运行。
-
-## 仓库中的 Python 文件
-
-- `build_tools/configuration.py`：校验工具集版本，并合并基础配置与每个上游版本的配置。
-- `build_tools/upstream.py`：下载、校验并安全解压上游归档。
-- `build_tools/staging.py`：暂存公共数据、根启动器和宿主运行集。
-- `build_tools/packaging.py`：生成记录、Manifest 和可复现的 Release 归档。
-- `build_tools/toolset_cli.py`：暴露可复用的版本、下载和暂存命令。
-- `build_tools/ci_cli.py`：分派 CI 专用任务。
-- `build_tools/native_build.py`、`build_tools/smoke_tests.py` 和 `build_tools/release_tasks.py`：分别负责原生构建、冒烟测试和发布流程。
-- `build_tools/ci_support.py`：提供共用的进程和文件系统辅助函数。
-- `tools/register-upstream.cmd` 与 `tools/register-upstream.sh`：无需语言运行时，在本地登记上游校验信息。
-- `tests/test_toolset.py`：测试完整性失败、确定性打包、路径安全、权限元数据和宿主调用契约。
-
-这些文件只用于下载、构建、组装、验证和测试，不会进入最终 NSIS toolset，也不是任何下游使用依赖。选择 Python 是因为同一套组装逻辑需要跨 Windows、Linux 和 macOS 运行，而且 NSIS 自身的 SCons 源码构建本来就需要 Python。
-
-Linux 使用静态用户态二进制，并校验 GNU ABI note（x64 内核基线 3.2，arm64 为 3.7）。macOS deployment target 分别为 10.13（x64）和 11.0（arm64）。这些是构建基线；实际 CI 环境会写入 provenance。Windows Server 2022 已验证，但本项目不替上游宣称更老的 Windows 兼容性。
-
-本地可完成、不需要全部原生系统的检查：
+从对应的 GitHub Release 下载带版本的 ZIP 和 `.sha256` 文件。校验外层 ZIP
+哈希、解压，然后运行根启动器：
 
 ```powershell
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 download --cache artifacts/upstream
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-common --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
-python -m build_tools.toolset_cli --upstream-config config/upstream/3.12.json --toolset-version 3.12-r1 stage-windows-host --archive artifacts/upstream/nsis-3.12.zip --stage artifacts/stage --work artifacts/work
+.\makensis.cmd path\to\installer.nsi
+```
+
+```sh
+chmod +x makensis hosts/*/makensis
+./makensis path/to/installer.nsi
+```
+
+根启动器会把 `NSISDIR` 设置为包内的 `common/` 目录。程序化集成应读取
+`toolset-manifest.json`，选择兼容的宿主记录，相对于解压根目录解析 `binary`
+和 `requiredEnvironment`，恢复声明的可执行权限，然后直接调用真实二进制。
+
+Release 布局、完整性校验、宿主选择契约和各资产含义见
+[消费者指南](docs/consumer-guide.md)。
+
+## 构建与发布
+
+只有推送版本 Tag 或手动触发 workflow 才会开始构建。版本格式为
+`v<已登记上游版本>-<本地标签>`，例如 `v3.12-r1` 或
+`v3.12-preview.2`。手动触发会完成全部构建与验证，但不会创建 GitHub
+Release。
+
+流水线只下载一次每个上游归档，构建四个原生宿主，在 Windows 测试五个宿主
+生成的安装器，在 Linux 组装 Release，并在指定环节要求重复构建或重复打包的
+字节完全一致。
+
+- [构建与发布指南](docs/build-and-release.md)
+- [上游版本登记](docs/upstream-registration.md)
+- [来源与构建记录](docs/source-and-build.md)
+
+本地运行仓库单元测试：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE = '1'
 python -m unittest discover -s tests -v
 ```
 
-所有生成的构建数据统一放在 `artifacts/`。`artifacts/stage` 是等待打包的
-完整目录树；它还没有发布，也不是最终压缩包，因此保留 `stage` 名称比
-`release` 更准确。可以发布的文件写入 `artifacts/dist`。
-
-完整原生构建放在 CI 中，避免用 Windows 交叉环境冒充 macOS。完整参数、输入哈希和“无补丁”记录见 [SOURCES.md](SOURCES.md)。
-
-## 发布与消费
-
-只有推送 tag 或手动触发才启动工作流。版本格式为 `v<已登记上游版本>-<本地标识>`，例如 `v3.12-r1`、`v3.12-preview.2`。手动触发只构建和验证；合法 tag 推送在全部安装/卸载验收通过后发布。正式资产包括 ZIP、ZIP 的 SHA-256、`toolset-manifest.json`、`build-provenance.json` 和 `source-record.md`。
-
-Actions 临时 artifact 只用于 job 间传递。消费者必须使用带版本的 GitHub Release 资产，固定外层 ZIP SHA-256，校验内部 Manifest，只选择一个宿主，恢复权限，设置声明的环境变量，并分发或调用 `common/` 与该宿主运行集。不得使用 Actions artifact 或 `latest` URL。`DotNet.Bundler.Nsis` 只是一个可能的消费者，不享有特殊地位，也不定义本项目规范。
-
-## 升级流程
-
-1. 选择明确的 NSIS 上游版本与新的包装修订号。
-2. Windows 运行 `tools/register-upstream.cmd`，Linux/macOS 运行 `tools/register-upstream.sh`，人工检查生成的 `config/upstream/<版本>.json`；不同本地标识复用同一文件。
-3. 重新审计官方 ZIP 结构，尤其是真实 Windows 编译器与全部运行时依赖。
-4. 审查上游构建参数及 `Source/exehead/config.h` 的兼容约束；公共数据和原生编译器源码必须完全匹配。
-5. 跑完整原生矩阵、重复构建比较、重定位测试和全宿主 Windows 安装/卸载测试。
-6. 审查上游许可变化，更新中英文文档，创建精确版本 tag，由受保护 workflow 一次性发布。
-
-## 来源与许可
-
-SourceForge 为两个上游归档公布 SHA-1 和 MD5；本项目对从官方 URL 下载的实际字节独立计算 SHA-256，不把 SHA-256 说成上游公布值。下载只有在字节数、上游公布 SHA-1 和本地派生 SHA-256 同时匹配时才接受；MD5 仅作为来源一致性记录，不作为安全校验。准确数值见 [SOURCES.md](SOURCES.md)。解压会拒绝路径穿越，Actions 使用明确的完整发布版本，SCons wheel 固定版本与哈希。本仓库原创自动化采用 MIT 许可；每个工具集都在 `common/COPYING` 保留 NSIS 上游许可。
-
-- Windows ZIP：上游公布 SHA-1 `364fd795b0cafc1fbff3e966f103a8f8fc8fb7f1`，上游公布 MD5 `757c22153dd8b90f5e297310d9966997`，本地派生 SHA-256 `56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f`。
-- 源码包：上游公布 SHA-1 `432e99150881c061c7e313eb1aac45763d951572`，上游公布 MD5 `8ec7c3e1228ac4eb96e5e421610b4aae`，本地派生 SHA-256 `f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186`。
+仓库原创自动化采用 MIT 许可。重新分发的 NSIS 内容会在每个工具集归档的
+`common/COPYING` 中保留上游许可证。
