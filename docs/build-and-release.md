@@ -3,16 +3,16 @@
 ## Workflow
 
 ```text
-resolve -> download -> windows-host -> native-hosts -> install-test -> assemble -> release
+resolve -> download -> common-and-windows-host-smoke -> native-hosts-smoke -> installer-smoke -> assemble -> release
 ```
 
 | Job | Purpose |
 | --- | --- |
 | `resolve` | Validate the tag/input and select an upstream config |
 | `download` | Download each upstream archive once and verify it |
-| `windows-host` | Stage common files and the Windows x86 host, then run smoke compilation |
-| `native-hosts` | Build four native hosts twice and run smoke compilation |
-| `install-test` | Install and uninstall all five smoke installers on Windows |
+| `common-and-windows-host-smoke` | Stage common files and the Windows x86 host, then run smoke compilation |
+| `native-hosts-smoke` | Build four native hosts twice and run smoke compilation |
+| `installer-smoke` | Install and uninstall all five smoke installers on Windows |
 | `assemble` | Create records, verify the manifest, package twice, and test the relocated ZIP |
 | `release` | Publish validated assets for a pushed version tag only |
 
@@ -31,7 +31,7 @@ these paths do not all exist at the same time.
 | `smoke/` | Smoke fixture and generated installer |
 | `native-1/`, `native-2/` | Two native builds compared for reproducibility |
 | `native-work/` | Native source and build directories |
-| `installers/` | Smoke installers downloaded by `install-test` |
+| `installers/` | Smoke installers downloaded by `installer-smoke` |
 | `installed/` | Temporary installation targets |
 | `hosts/` | Native hosts downloaded by `assemble` |
 | `repeat/` | Second ZIP used for byte comparison |
@@ -45,6 +45,7 @@ Temporary Actions artifact names are `verified-upstream`, `windows-stage`,
 
 ## Local checks
 
+The following example uses upstream NSIS 3.12 and toolset version `3.12-r1`.
 Windows can validate the official host locally:
 
 ```powershell
@@ -78,8 +79,7 @@ Choose a tag such as `v3.12-r1`.
 - For a new upstream NSIS version, register and commit its
   `config/upstream/<version>.json` first.
 - For another local revision of an existing upstream version, reuse its config.
-- Update release-specific documentation when the upstream version or build
-  facts change.
+- Update the shared build documentation only when the build policy changes.
 
 Confirm that the tag resolves correctly:
 

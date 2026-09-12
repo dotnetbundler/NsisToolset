@@ -35,7 +35,7 @@ chmod +x makensis hosts/*/makensis
 - [消费者指南](docs/consumer-guide.md)
 - [构建与发布](docs/build-and-release.md)
 - [登记上游版本](docs/upstream-registration.md)
-- [来源与构建记录](docs/source-and-build.md)
+- [来源与构建策略](docs/source-and-build.md)
 
 运行测试：
 

@@ -15,7 +15,8 @@ files and must not be used as release dependencies.
 
 ## Verify
 
-Verify the ZIP before extracting it:
+Verify the ZIP before extracting it. The following commands use `3.12-r1` as
+an example:
 
 ```sh
 sha256sum --check nsis-toolset-3.12-r1.zip.sha256

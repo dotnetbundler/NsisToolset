@@ -36,7 +36,7 @@ See the [consumer guide](docs/consumer-guide.md).
 - [Consumer guide](docs/consumer-guide.md)
 - [Build and release](docs/build-and-release.md)
 - [Register an upstream release](docs/upstream-registration.md)
-- [Source and build record](docs/source-and-build.md)
+- [Source and build policy](docs/source-and-build.md)
 
 Run tests with:
 

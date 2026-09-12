@@ -1,22 +1,38 @@
-# Source and build record
+# Source and build policy
 
-The machine-readable source of truth is `config/upstream/3.12.json`. Each
-Release also includes a generated `source-record.md`.
+The machine-readable source of truth for each upstream NSIS version is
+`config/upstream/<version>.json`. Adding a version requires one new upstream
+config; this document is not copied or rewritten for each version.
 
-- Current toolset: `3.12-r1`
-- Upstream NSIS: `3.12`
-- `SOURCE_DATE_EPOCH`: `1776631488` (`2026-04-19T20:44:48Z`)
+Every release includes a generated `source-record.md` containing its exact
+toolset version, upstream version, `SOURCE_DATE_EPOCH`, archive URLs, sizes, and
+digests.
 
-## Inputs
+## Generated source record
 
-| File | Bytes | Published SHA-1 | Published MD5 | Local SHA-256 |
-| --- | ---: | --- | --- | --- |
-| `nsis-3.12.zip` | 2,362,938 | `364fd795b0cafc1fbff3e966f103a8f8fc8fb7f1` | `757c22153dd8b90f5e297310d9966997` | `56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f` |
-| `nsis-3.12-src.tar.bz2` | 1,818,389 | `432e99150881c061c7e313eb1aac45763d951572` | `8ec7c3e1228ac4eb96e5e421610b4aae` | `f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186` |
+`source-record.md` is not stored in the repository and is not created by the
+upstream registration scripts. The `assemble` command generates it from the
+selected `config/upstream/<version>.json` after all host and installer smoke
+tests pass:
 
-Downloads use the versioned NSIS 3.12 directory on SourceForge. Before
-extraction, the build requires the byte size, published SHA-1, and local
-SHA-256 to match. Published MD5 is recorded but is not an acceptance check.
+1. `packaging.write_source_record` writes `stage/SOURCE-RECORD.md`.
+2. The staged uppercase file is included inside the toolset ZIP and covered by
+   `toolset-manifest.json`.
+3. `release_tasks.assemble` also copies the same content to
+   `artifacts/dist/source-record.md` as a standalone release asset.
+
+The file therefore exists only after a successful assemble run. Tag workflows
+publish the standalone copy together with the ZIP and the other release assets.
+
+## Source acceptance
+
+Each upstream config records the official Windows ZIP and source archive. A
+download is accepted only when its byte size, upstream-published SHA-1, and
+locally derived SHA-256 match the config. Upstream-published MD5 is retained as
+an additional record but is not an acceptance check.
+
+Register new upstream versions with
+[upstream-registration.md](upstream-registration.md).
 
 ## Build rules
 
@@ -24,13 +40,13 @@ SHA-256 to match. Published MD5 is recorded but is not an acceptance check.
 - `NSIS_CONFIG_CONST_DATA_PATH=no`; every host requires `NSISDIR=common`.
 - Linux compilers are static and their GNU ABI notes are checked.
 - macOS deployment targets are 10.13 for x64 and 11.0 for ARM64.
-- SCons 4.8.1 is pinned by version and wheel hash.
+- SCons is pinned by version and wheel hash in `requirements-build.txt`.
 - Native compilers are built twice on the same runner and compared byte for byte.
 - Build details are written to `build-provenance.json`.
 
-The Windows runtime is `Bin/makensis.exe` and `Bin/zlib1.dll` from the official
-ZIP. The upstream root `makensis.exe` is only a launcher and is not used as the
-host compiler.
+The Windows runtime comes from `Bin/makensis.exe` and `Bin/zlib1.dll` in the
+verified official Windows ZIP. The upstream root `makensis.exe` is only a
+launcher and is not used as the host compiler.
 
 The NSIS license is included as `common/COPYING`. Repository automation is
 covered by the root `LICENSE`.
