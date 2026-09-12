@@ -30,7 +30,6 @@ class Arguments(argparse.Namespace):
     metadata: Path
     hosts: Path
     artifacts: Path
-    source_commit: str
     destination: Path
     installer: Path
     install_root: Path
@@ -69,7 +68,6 @@ def create_parser() -> argparse.ArgumentParser:
     command.add_argument("--stage", type=Path, required=True)
     command.add_argument("--hosts", type=Path, required=True)
     command.add_argument("--artifacts", type=Path, required=True)
-    command.add_argument("--source-commit", required=True)
 
     command = commands.add_parser("release-package-smoke")
     command.add_argument("--archive", type=Path, required=True)
@@ -101,7 +99,7 @@ def main() -> None:
     elif args.command == "native-smoke":
         smoke_tests.native_smoke(config, args.rid, args.binary, args.metadata, args.stage, args.fixture, args.smoke)
     elif args.command == "assemble":
-        release_tasks.assemble(config, args.stage, args.hosts, args.artifacts, args.source_commit)
+        release_tasks.assemble(config, args.stage, args.hosts, args.artifacts)
     elif args.command == "release-package-smoke":
         smoke_tests.release_package_smoke(config, args.archive, args.destination, args.smoke, args.fixture)
     elif args.command == "publish":

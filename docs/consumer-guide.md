@@ -1,69 +1,32 @@
 # Consumer guide
 
-Use assets from a versioned GitHub Release. Actions artifacts are temporary CI
-files and must not be used as release dependencies.
+Download these two files from the same GitHub Release:
 
-## Release assets
+- `nsis-toolset-<version>.zip`
+- `nsis-toolset-<version>.zip.sha256`
 
-| Asset | Content |
-| --- | --- |
-| `nsis-toolset-<version>.zip` | Complete toolset |
-| `nsis-toolset-<version>.zip.sha256` | ZIP checksum |
-| `toolset-manifest.json` | File and host metadata |
-| `build-provenance.json` | Build environment and native-host records |
-| `source-record.md` | Upstream URLs and checksums |
-
-## Verify
-
-Verify the ZIP before extracting it. The following commands use `3.12-r1` as
-an example:
-
-```sh
-sha256sum --check nsis-toolset-3.12-r1.zip.sha256
-```
+Verify the ZIP, extract it, and run the launcher in its root directory:
 
 ```powershell
-$expected = (Get-Content nsis-toolset-3.12-r1.zip.sha256).Split()[0]
-$actual = (Get-FileHash nsis-toolset-3.12-r1.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksum = Get-ChildItem 'nsis-toolset-*.zip.sha256' | Select-Object -First 1
+$zip = $checksum.FullName -replace '\.sha256$', ''
+$expected = (Get-Content $checksum.FullName).Split()[0]
+$actual = (Get-FileHash $zip -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw 'checksum mismatch' }
+
+Expand-Archive $zip -DestinationPath nsis-toolset
+.\nsis-toolset\makensis.cmd path\to\installer.nsi
 ```
 
-After extraction, verify the `size` and `sha256` of every file listed in
-`toolset-manifest.json`. Restore `unixMode` for files whose
-`requiresExecutable` value is `true`.
-
-## Layout
-
-```text
-makensis
-makensis.cmd
-common/
-hosts/
-  win-x86/      makensis.exe zlib1.dll
-  linux-x64/    makensis
-  linux-arm64/  makensis
-  osx-x64/      makensis
-  osx-arm64/    makensis
-build-record.json
-SOURCE-RECORD.md
-toolset-manifest.json
+```sh
+sha256sum --check nsis-toolset-*.zip.sha256
+unzip nsis-toolset-*.zip -d nsis-toolset
+./nsis-toolset/makensis path/to/installer.nsi
 ```
 
-`common/` contains NSIS headers, plug-ins, stubs, contributed files, config,
-and license data shared by every host.
+The launcher selects the correct host compiler and configures `NSISDIR`.
+Nothing else needs to be installed or configured.
 
-## Invoke
-
-Humans can use the root `makensis.cmd` or `makensis` launcher. The launcher sets
-`NSISDIR` and selects the current host.
-
-Programs should:
-
-1. Read `toolset-manifest.json`.
-2. Select a host whose `compatibleHostRids` contains the current RID.
-3. Resolve its `binary` against the toolset root.
-4. Resolve its `requiredEnvironment` values against the same root.
-5. Restore required executable modes and run the binary.
-
-Pin the outer ZIP SHA-256 in downstream dependency metadata. Verifying only the
-inner manifest does not identify which ZIP was downloaded.
+The ZIP contains only the two launchers, shared NSIS files under `common/`, and
+host compilers under `hosts/`. The Windows x86 compiler also runs on Windows
+x64 and ARM64 through Windows compatibility support.

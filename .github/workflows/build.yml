@@ -183,8 +183,8 @@ jobs:
           path: artifacts/hosts
       - name: Run the Python unit tests
         run: python -m unittest discover -s tests -v
-      - name: Assemble metadata and package twice with identical ZIP bytes
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts --source-commit "$GITHUB_SHA"
+      - name: Assemble and package twice with identical ZIP bytes
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts
       - name: Validate the final package after relocation to a path with spaces
         run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" release-package-smoke --archive "artifacts/dist/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip" --destination "artifacts/release package" --smoke "artifacts/release package smoke" --fixture fixtures/minimal.nsi
       - uses: actions/upload-artifact@v7.0.1

@@ -24,6 +24,7 @@ class ToolsetTests(unittest.TestCase):
             item.mkdir(parents=True)
             (item / "data").write_text(name)
         (stage / "common" / "Contrib").mkdir()
+        (stage / "common" / "Contrib" / "data").write_text("Contrib")
         (stage / "common" / "COPYING").write_text("license")
         (stage / "common" / "nsisconf.nsh").write_text("")
         config = {
@@ -57,6 +58,7 @@ class ToolsetTests(unittest.TestCase):
                 "unixExecutable": executable,
                 "minimumOs": "test",
             }
+        (stage / "hosts" / "win-x86" / "zlib1.dll").write_bytes(b"zlib")
         return stage, config
 
     def make_windows_archive(self, root: Path):
@@ -266,12 +268,11 @@ class ToolsetTests(unittest.TestCase):
                 self.assertEqual(stage.resolve() / "makensis", run_mock.call_args.args[0][0])
 
             release_stage, release_config = self.make_stage(root / "release", "3.12-r1")
-            packaging.generate_manifest(release_config, release_stage)
             archive = root / "release.zip"
-            packaging.deterministic_zip(release_stage, archive, release_config["sourceDateEpoch"])
+            packaging.deterministic_zip(release_config, release_stage, archive, release_config["sourceDateEpoch"])
             destination = root / "release package with spaces"
             with mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock, mock.patch.object(smoke_tests, "require_version") as version_mock:
-                smoke_tests.release_package_smoke(config, archive, destination, root / "release-smoke", fixture)
+                smoke_tests.release_package_smoke(release_config, archive, destination, root / "release-smoke", fixture)
                 self.assertEqual(destination.resolve() / "makensis", version_mock.call_args.args[0][0])
                 self.assertEqual(destination.resolve() / "makensis", run_mock.call_args.args[0][0])
 
@@ -299,51 +300,44 @@ class ToolsetTests(unittest.TestCase):
             self.assertEqual(f"/D={install_root.resolve()}", commands[0][-1])
             self.assertFalse(install_root.exists())
 
-    def test_manifest_is_complete_and_rejects_repository_content(self):
+    def test_stage_validation_rejects_non_runtime_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             stage, config = self.make_stage(root)
-            manifest = packaging.generate_manifest(config, stage)
-            self.assertEqual(5, len(manifest["hosts"]))
-            self.assertEqual("x86", manifest["hosts"][0]["architecture"])
-            self.assertIn("win-arm64", manifest["hosts"][0]["compatibleHostRids"])
+            packaging.validate_stage(config, stage)
             leaked = stage / "build_tools" / "helper.py"
             leaked.parent.mkdir()
             leaked.write_text("print('leaked')")
             with self.assertRaises(RuntimeError):
-                packaging.generate_manifest(config, stage)
+                packaging.validate_stage(config, stage)
 
     def test_zip_is_deterministic_and_permissions_are_repairable(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             stage, config = self.make_stage(root)
-            packaging.generate_manifest(config, stage)
             first, second = root / "one.zip", root / "two.zip"
-            packaging.deterministic_zip(stage, first, config["sourceDateEpoch"])
-            packaging.deterministic_zip(stage, second, config["sourceDateEpoch"])
+            packaging.deterministic_zip(config, stage, first, config["sourceDateEpoch"])
+            packaging.deterministic_zip(config, stage, second, config["sourceDateEpoch"])
             self.assertEqual(upstream.sha256(first), upstream.sha256(second))
             extracted = root / "release package with spaces"
-            manifest = packaging.verify_zip(first, extracted)
-            executable = next(item for item in manifest["files"] if item["path"] == "makensis")
-            self.assertTrue(executable["requiresExecutable"])
+            packaging.verify_zip(config, first, extracted)
             with zipfile.ZipFile(first) as bundle:
                 self.assertEqual(0o755, bundle.getinfo("makensis").external_attr >> 16)
-                forbidden = packaging.FORBIDDEN_RELEASE_ROOTS
-                self.assertFalse(any(Path(name).parts[0] in forbidden or name.endswith(".py") or name.endswith(".bin") for name in bundle.namelist()))
+                self.assertEqual(packaging.RELEASE_ROOTS, {Path(name).parts[0] for name in bundle.namelist()})
+                self.assertFalse(any(name.endswith((".json", ".md", ".py", ".bin")) for name in bundle.namelist()))
             if os.name != "nt":
                 self.assertTrue((extracted / "makensis").stat().st_mode & stat.S_IXUSR)
 
-    def test_local_labels_produce_distinct_manifests_and_archives(self):
+    def test_local_labels_do_not_add_metadata_to_runtime_archive(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             hashes = []
             for label in ("3.12-r1", "3.12-preview.2"):
                 stage, config = self.make_stage(root / label, label)
-                packaging.generate_manifest(config, stage)
                 archive = root / f"{label}.zip"
-                packaging.deterministic_zip(stage, archive, config["sourceDateEpoch"])
+                packaging.deterministic_zip(config, stage, archive, config["sourceDateEpoch"])
                 hashes.append(upstream.sha256(archive))
-            self.assertNotEqual(hashes[0], hashes[1])
+            self.assertEqual(hashes[0], hashes[1])
 
     def test_assemble_creates_complete_reproducible_release_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -359,31 +353,24 @@ class ToolsetTests(unittest.TestCase):
                 (binary.parent / "build-metadata.json").write_text(json.dumps(metadata))
                 staged_binary.unlink()
                 staged_binary.parent.rmdir()
-            release_tasks.assemble(config, stage, hosts, artifacts, "source-commit")
+            release_tasks.assemble(config, stage, hosts, artifacts)
             dist = artifacts / "dist"
             expected = {
                 "nsis-toolset-test-r1.zip",
                 "nsis-toolset-test-r1.zip.sha256",
-                "toolset-manifest.json",
-                "build-provenance.json",
-                "source-record.md",
             }
             self.assertEqual(expected, {path.name for path in dist.iterdir()})
             with zipfile.ZipFile(dist / "nsis-toolset-test-r1.zip") as bundle:
-                self.assertIn("build-record.json", bundle.namelist())
-                self.assertIn("SOURCE-RECORD.md", bundle.namelist())
+                self.assertEqual(packaging.RELEASE_ROOTS, {Path(name).parts[0] for name in bundle.namelist()})
+                self.assertFalse(any(name.endswith((".json", ".md")) for name in bundle.namelist()))
             self.assertEqual((dist / "nsis-toolset-test-r1.zip").read_bytes(), (artifacts / "repeat/nsis-toolset-test-r1.zip").read_bytes())
 
-    def test_tampering_is_detected(self):
+    def test_unexpected_host_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            stage = Path(temporary)
-            payload = stage / "payload"
-            payload.write_text("good")
-            manifest = {"toolsetVersion": "test", "launchers": {"windows": "makensis.cmd", "posix": "makensis"}, "hosts": [], "files": [packaging.file_record(stage, payload)]}
-            (stage / "toolset-manifest.json").write_text(json.dumps(manifest))
-            payload.write_text("bad")
+            stage, config = self.make_stage(Path(temporary))
+            (stage / "hosts" / "linux-x64" / "build-metadata.json").write_text("{}")
             with self.assertRaises(RuntimeError):
-                packaging.verify_manifest(stage)
+                packaging.validate_stage(config, stage)
 
     def test_cli_parsers_expose_only_current_commands(self):
         toolset_commands = set(create_toolset_parser()._subparsers._group_actions[0].choices)

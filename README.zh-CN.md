@@ -5,8 +5,6 @@
 NsisToolset 将 NSIS 打包为带版本、可重定位的 Windows、Linux 和 macOS
 构建工具集，无需在系统中安装 NSIS。
 
-示例版本：**`3.12-r1`**（NSIS `3.12`，修订版本 `r1`）。
-
 ## 使用
 
 从对应的 GitHub Release 下载带版本的 ZIP 和 `.sha256` 文件。校验哈希、
@@ -22,12 +20,7 @@ chmod +x makensis hosts/*/makensis
 ./makensis path/to/installer.nsi
 ```
 
-支持的 RID 为 `win-x86`、`linux-x64`、`linux-arm64`、`osx-x64` 和
-`osx-arm64`。Windows x86 编译器也可通过 Windows 兼容能力在 x64 和 ARM64
-上运行，但它不是 ARM64 原生程序。
-
-程序化消费者应从 `toolset-manifest.json` 选择兼容宿主，恢复声明的执行权限，
-相对于解压根目录解析二进制和必需环境变量，然后调用该二进制。详见
+启动器会自动选择当前宿主的编译器并配置 `NSISDIR`。校验命令见
 [消费者指南](docs/consumer-guide.md)。
 
 ## 文档

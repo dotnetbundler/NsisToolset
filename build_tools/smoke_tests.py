@@ -31,7 +31,5 @@ def native_smoke(config: dict, rid: str, binary: Path, metadata: Path, stage: Pa
 
 
 def release_package_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:
-    manifest = packaging.verify_zip(archive, destination)
-    if manifest["toolsetVersion"] != config["toolsetVersion"]:
-        raise RuntimeError("release package manifest version does not match requested toolset")
+    packaging.verify_zip(config, archive, destination)
     _compile_with_launcher(config, destination, fixture, smoke, [destination.resolve() / "makensis"])

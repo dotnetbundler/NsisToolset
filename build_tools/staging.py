@@ -11,6 +11,7 @@ from . import upstream
 from .ci_support import recreate
 
 COMMON_ITEMS = ("Contrib", "Include", "Plugins", "Stubs", "nsisconf.nsh", "COPYING")
+WINDOWS_RUNTIME_ITEMS = ("makensis.exe", "zlib1.dll")
 
 
 def _copy_item(source: Path, destination: Path) -> None:
@@ -22,7 +23,7 @@ def _copy_item(source: Path, destination: Path) -> None:
 
 
 def write_root_launchers(stage: Path) -> None:
-    """Write human-facing dispatchers; API consumers invoke manifest binaries directly."""
+    """Write launchers that select the current host and configure NSISDIR."""
     windows_path = stage / "makensis.cmd"
     posix_path = stage / "makensis"
     stage.mkdir(parents=True, exist_ok=True)
@@ -95,7 +96,7 @@ def stage_windows_host(config: dict, archive: Path, stage: Path, work: Path) -> 
     upstream_root = _extract_windows(config, archive, work, clean=False)
     host = stage / "hosts" / "win-x86"
     host.mkdir(parents=True, exist_ok=True)
-    for name in ("makensis.exe", "zlib1.dll"):
+    for name in WINDOWS_RUNTIME_ITEMS:
         source = upstream_root / "Bin" / name
         if not source.is_file():
             raise RuntimeError(f"official ZIP lacks required Windows runtime file: Bin/{name}")

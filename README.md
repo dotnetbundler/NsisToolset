@@ -5,8 +5,6 @@
 NsisToolset packages NSIS as a versioned, relocatable toolset for Windows,
 Linux, and macOS build hosts. No system-wide NSIS installation is required.
 
-Example version: **`3.12-r1`** (NSIS `3.12`, revised version `r1`).
-
 ## Use
 
 Download the versioned ZIP and `.sha256` file from the matching GitHub Release.
@@ -22,14 +20,8 @@ chmod +x makensis hosts/*/makensis
 ./makensis path/to/installer.nsi
 ```
 
-Supported toolset RIDs are `win-x86`, `linux-x64`, `linux-arm64`, `osx-x64`,
-and `osx-arm64`. The Windows x86 compiler also runs on Windows x64 and ARM64
-through Windows compatibility support; it is not a native ARM64 binary.
-
-Programmatic consumers should select a compatible host from
-`toolset-manifest.json`, restore declared executable modes, resolve its binary
-and required environment against the extracted root, and invoke that binary.
-See the [consumer guide](docs/consumer-guide.md).
+The launcher selects the correct host compiler and configures `NSISDIR`.
+See the [consumer guide](docs/consumer-guide.md) for checksum commands.
 
 ## Documentation
 

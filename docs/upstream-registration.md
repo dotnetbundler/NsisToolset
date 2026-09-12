@@ -6,8 +6,7 @@ Create one config for each upstream NSIS version:
 config/upstream/<version>.json
 ```
 
-Local labels share that config. For example, `v3.12-r1` and
-`v3.12-preview.2` both use `config/upstream/3.12.json`.
+Local labels for the same upstream version share that config.
 
 ## Get the required values
 
@@ -16,10 +15,6 @@ Open the NSIS version directory on SourceForge:
 ```text
 https://sourceforge.net/projects/nsis/files/NSIS%203/<version>/
 ```
-
-For version `3.12`, use:
-
-<https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/>
 
 SourceForge documents that SHA1 and MD5 are shown by clicking the information
 icon beside a file:
@@ -30,7 +25,7 @@ Collect these values:
 
 | Argument | How to get it |
 | --- | --- |
-| `VERSION` | NSIS version, for example `3.12` |
+| `VERSION` | NSIS version |
 | `SOURCE_DATE_EPOCH` | Source archive's UTC modified time, formatted as `YYYY-MM-DD HH:MM:SS UTC`; the script converts it to Unix seconds |
 | `WINDOWS_SHA1` | Click the information icon for `nsis-<version>.zip`; copy SHA1 |
 | `WINDOWS_MD5` | From the same information panel; copy MD5 |
