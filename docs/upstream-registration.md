@@ -1,92 +1,97 @@
-# Registering an upstream NSIS release
+# Register an upstream NSIS release
 
-Use this procedure when adding a new upstream NSIS version. Packaging labels do
-not require new upstream files.
-
-## Configuration model
-
-Store exactly one configuration file for each upstream NSIS version:
+Create one config for each upstream NSIS version:
 
 ```text
-config/upstream/<upstream-version>.json
+config/upstream/<version>.json
 ```
 
-For example, both `v3.12-r1` and `v3.12-preview.2` use
-`config/upstream/3.12.json`. The local labels `r1` and `preview.2` distinguish
-toolset releases; they do not describe different upstream archives.
+Local labels share that config. For example, `v3.12-r1` and
+`v3.12-preview.2` both use `config/upstream/3.12.json`.
 
-## Required source facts
+## Get the required values
 
-Before running a registration tool:
+Open the NSIS version directory on SourceForge:
 
-1. Copy the Windows archive SHA-1 and MD5 from its SourceForge file information
-   page.
-2. Copy the source archive SHA-1 and MD5 from its SourceForge file information
-   page.
-3. Obtain `SOURCE_DATE_EPOCH` from the official source archive's UTC release
-   time.
-
-These values are explicit inputs so a checksum calculated from a new download
-is never misrepresented as an upstream-published checksum.
-
-## Register on Windows
-
-Run from Command Prompt:
-
-```bat
-tools\register-upstream.cmd 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
+```text
+https://sourceforge.net/projects/nsis/files/NSIS%203/<version>/
 ```
 
-The Windows tool uses the in-box `curl.exe` and `certutil.exe`; it does not use
-Python, Node.js, PowerShell, or .NET.
+For version `3.12`, use:
 
-## Register on Linux or macOS
+<https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/>
 
-Run with the system shell:
+SourceForge documents that SHA1 and MD5 are shown by clicking the information
+icon beside a file:
+
+<https://sourceforge.net/p/forge/documentation/Verifying%20downloaded%20files/>
+
+Collect these values:
+
+| Argument | How to get it |
+| --- | --- |
+| `VERSION` | NSIS version, for example `3.12` |
+| `WINDOWS_SHA1` | Click the information icon for `nsis-<version>.zip`; copy SHA1 |
+| `WINDOWS_MD5` | From the same information panel; copy MD5 |
+| `SOURCE_SHA1` | Click the information icon for `nsis-<version>-src.tar.bz2`; copy SHA1 |
+| `SOURCE_MD5` | From the same information panel; copy MD5 |
+| `SOURCE_DATE_EPOCH` | Convert the source archive's displayed UTC modified time to Unix seconds |
+
+SHA-1 values contain 40 hexadecimal characters. MD5 values contain 32.
+Do not calculate these four values yourself: they must be copied from the
+upstream record. The scripts calculate SHA-256 and file sizes after downloading.
+
+For example, if the source archive time is `2026-04-19 20:44:48 UTC`, convert it
+as follows.
+
+Windows PowerShell:
+
+```powershell
+[DateTimeOffset]::Parse('2026-04-19T20:44:48Z').ToUnixTimeSeconds()
+```
+
+Linux:
 
 ```sh
-sh tools/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
+date -u -d '2026-04-19 20:44:48 UTC' +%s
 ```
 
-The POSIX tool uses the system `curl` and checksum commands. It supports GNU
-`sha*sum` as well as the macOS `shasum` and `md5` tools. It does not use Python,
-Node.js, or .NET.
-
-## Retain downloads for inspection
-
-Both tools normally remove downloaded archives after completion or failure. To
-keep them under `.cache/upstream/<version>`, append `--keep-downloads`:
-
-```bat
-tools\register-upstream.cmd 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads
-```
+macOS:
 
 ```sh
-sh tools/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads
+date -j -u -f '%Y-%m-%d %H:%M:%S' '2026-04-19 20:44:48' +%s
 ```
 
-An explicit retention directory may follow the option:
+All three commands produce `1776631488` for this example.
+
+## Run the tool
+
+Windows Command Prompt:
 
 ```bat
-tools\register-upstream.cmd 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads C:\temp\nsis-3.12
+tools\register-upstream.cmd VERSION SOURCE_DATE_EPOCH WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
 ```
+
+Linux or macOS:
 
 ```sh
-sh tools/register-upstream.sh 3.12 1776631488 WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5 --keep-downloads /tmp/nsis-3.12
+sh tools/register-upstream.sh VERSION SOURCE_DATE_EPOCH WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
 ```
 
-## Review the result
+The tool downloads both archives, verifies the supplied SHA-1 and MD5 values,
+calculates SHA-256 and sizes, and writes `config/upstream/<version>.json`. It
+refuses to overwrite an existing config.
 
-The tools download the official Windows and source archives, require the given
-SHA-1 and MD5 values to match, calculate SHA-256 and byte sizes locally, and
-write `config/upstream/<version>.json`. They never overwrite an existing
-configuration.
+Downloads are deleted by default. To keep them:
 
-Before committing the new file:
+```text
+--keep-downloads [directory]
+```
 
-1. Compare its URLs, sizes, and published digests with the upstream pages.
-2. Confirm the filename matches its `upstreamVersion` value.
-3. Review the standard ZIP layout and Windows runtime dependencies.
-4. Review upstream source/build changes and licenses.
-5. Run the full native matrix and release validation described in the
-   [build and release guide](build-and-release.md).
+Without a directory, files are kept under `.cache/upstream/<version>`.
+
+## Review
+
+Before committing the config, check its version, filenames, URLs, sizes,
+digests, and `SOURCE_DATE_EPOCH`. Then run the full workflow for the new
+upstream version.
