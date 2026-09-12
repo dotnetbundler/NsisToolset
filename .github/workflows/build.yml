@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: '3.12'
       - id: version
-        name: Validate tag or manual input and resolve upstream configuration
+        name: resolve version and upstream configuration.
         env:
           REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.toolset-version || github.ref_name }}
         run: python -m build_tools.toolset_cli resolve-version --version "$REQUESTED_VERSION" --github-output "$GITHUB_OUTPUT"
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.12'
-      - name: Download and verify size, SHA-1, and SHA-256
+      - name: Download and verify
         run: python -m build_tools.toolset_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" download --cache artifacts/upstream
       - uses: actions/upload-artifact@v7.0.1
         with:
