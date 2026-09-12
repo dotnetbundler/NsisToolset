@@ -112,7 +112,11 @@ def build_native(config: dict, archive: Path, data_root: Path, output: Path, rid
         "SKIPDOC=all",
     ]
     if rid.startswith("linux-"):
-        command.append("APPEND_LINKFLAGS=-static")
+        # glibc's static stdio vtable references _IO_wfile_doallocate weakly,
+        # so the archive member that implements it is otherwise omitted. NSIS
+        # uses fwprintf for all compiler output and then jumps through a null
+        # vtable slot as soon as it tries to print (including for -VERSION).
+        command.append("APPEND_LINKFLAGS=-static -Wl,-u,_IO_wfile_doallocate")
     elif rid == "osx-x64":
         environment["MACOSX_DEPLOYMENT_TARGET"] = "10.13"
         command.extend(["APPEND_CCFLAGS=-mmacosx-version-min=10.13", "APPEND_LINKFLAGS=-mmacosx-version-min=10.13"])

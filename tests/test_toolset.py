@@ -148,7 +148,7 @@ class ToolsetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 native_build.safe_extract_source(unsafe, root / "unsafe-out")
 
-    def test_native_build_uses_absolute_scons_install_prefix(self):
+    def test_native_build_uses_absolute_prefix_data_root_and_static_stdio_symbol(self):
         with tempfile.TemporaryDirectory(dir=configuration.ROOT) as temporary:
             root = Path(temporary)
             relative_root = root.relative_to(configuration.ROOT)
@@ -163,6 +163,7 @@ class ToolsetTests(unittest.TestCase):
                 "upstream": {"sourceArchive": {}},
             }
             scons_prefixes = []
+            scons_link_flags = []
             version_data_roots = []
 
             def simulate(command, **_kwargs):
@@ -170,6 +171,7 @@ class ToolsetTests(unittest.TestCase):
                     arguments = [str(item) for item in command]
                     prefix = Path(next(item.removeprefix("PREFIX=") for item in arguments if item.startswith("PREFIX=")))
                     scons_prefixes.append(prefix)
+                    scons_link_flags.append(next(item for item in arguments if item.startswith("APPEND_LINKFLAGS=")))
                     (prefix / "makensis").write_bytes(b"compiler")
                     return mock.Mock(stdout="")
                 if "-VERSION" in command:
@@ -193,6 +195,7 @@ class ToolsetTests(unittest.TestCase):
 
             self.assertEqual([(root / "work/install").resolve()], scons_prefixes)
             self.assertTrue(scons_prefixes[0].is_absolute())
+            self.assertEqual(["APPEND_LINKFLAGS=-static -Wl,-u,_IO_wfile_doallocate"], scons_link_flags)
             self.assertEqual([str((root / "stage/common").resolve())], version_data_roots)
 
     def test_common_and_windows_host_are_staged_independently(self):
