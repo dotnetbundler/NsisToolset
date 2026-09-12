@@ -75,7 +75,7 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
     recreate(work)
     recreate(output)
     source = safe_extract_source(archive, work / "src")
-    install = work / "install"
+    install = (work / "install").resolve()
     install.mkdir()
 
     version = config["upstreamVersion"]

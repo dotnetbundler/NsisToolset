@@ -148,6 +148,47 @@ class ToolsetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 native_build.safe_extract_source(unsafe, root / "unsafe-out")
 
+    def test_native_build_uses_absolute_scons_install_prefix(self):
+        with tempfile.TemporaryDirectory(dir=configuration.ROOT) as temporary:
+            root = Path(temporary)
+            relative_root = root.relative_to(configuration.ROOT)
+            archive = relative_root / "source.tar.bz2"
+            archive.write_bytes(b"source")
+            config = {
+                "upstreamVersion": "3.12",
+                "sourceDateEpoch": 1776631488,
+                "upstream": {"sourceArchive": {}},
+            }
+            scons_prefixes = []
+
+            def simulate(command, **_kwargs):
+                if command[0] == "scons":
+                    arguments = [str(item) for item in command]
+                    prefix = Path(next(item.removeprefix("PREFIX=") for item in arguments if item.startswith("PREFIX=")))
+                    scons_prefixes.append(prefix)
+                    (prefix / "makensis").write_bytes(b"compiler")
+                    return mock.Mock(stdout="")
+                if "-VERSION" in command:
+                    return mock.Mock(stdout="v3.12\n")
+                if command[0] == "file":
+                    return mock.Mock(stdout="ELF executable\n")
+                if command[0] == "readelf":
+                    return mock.Mock(stdout="ABI: 3.2.0\n")
+                if command[0] == "ldd":
+                    return mock.Mock(stdout="statically linked\n", stderr="")
+                self.fail(f"unexpected command: {command}")
+
+            with (
+                mock.patch.object(upstream, "checked_file"),
+                mock.patch.object(native_build, "safe_extract_source", return_value=relative_root / "src/nsis"),
+                mock.patch.object(native_build, "run", side_effect=simulate),
+                mock.patch.object(native_build, "write_metadata"),
+            ):
+                native_build.build_native(config, archive, relative_root / "output", "linux-x64", relative_root / "work")
+
+            self.assertEqual([(root / "work/install").resolve()], scons_prefixes)
+            self.assertTrue(scons_prefixes[0].is_absolute())
+
     def test_common_and_windows_host_are_staged_independently(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
