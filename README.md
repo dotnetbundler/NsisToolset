@@ -5,7 +5,7 @@
 NsisToolset packages NSIS as a versioned, relocatable toolset for Windows,
 Linux, and macOS build hosts. No system-wide NSIS installation is required.
 
-Current version: **`3.12-r1`** (NSIS `3.12`, local label `r1`).
+Example version: **`3.12-r1`** (NSIS `3.12`, revised version `r1`).
 
 ## Use
 
