@@ -31,51 +31,31 @@ Collect these values:
 | Argument | How to get it |
 | --- | --- |
 | `VERSION` | NSIS version, for example `3.12` |
+| `SOURCE_DATE_EPOCH` | Source archive's UTC modified time, formatted as `YYYY-MM-DD HH:MM:SS UTC`; the script converts it to Unix seconds |
 | `WINDOWS_SHA1` | Click the information icon for `nsis-<version>.zip`; copy SHA1 |
 | `WINDOWS_MD5` | From the same information panel; copy MD5 |
 | `SOURCE_SHA1` | Click the information icon for `nsis-<version>-src.tar.bz2`; copy SHA1 |
 | `SOURCE_MD5` | From the same information panel; copy MD5 |
-| `SOURCE_DATE_EPOCH` | Convert the source archive's displayed UTC modified time to Unix seconds |
 
 SHA-1 values contain 40 hexadecimal characters. MD5 values contain 32.
 Do not calculate these four values yourself: they must be copied from the
 upstream record. The scripts calculate SHA-256 and file sizes after downloading.
 
-For example, if the source archive time is `2026-04-19 20:44:48 UTC`, convert it
-as follows.
-
-Windows PowerShell:
-
-```powershell
-[DateTimeOffset]::Parse('2026-04-19T20:44:48Z').ToUnixTimeSeconds()
-```
-
-Linux:
-
-```sh
-date -u -d '2026-04-19 20:44:48 UTC' +%s
-```
-
-macOS:
-
-```sh
-date -j -u -f '%Y-%m-%d %H:%M:%S' '2026-04-19 20:44:48' +%s
-```
-
-All three commands produce `1776631488` for this example.
+For example, pass `2026-04-19 20:44:48 UTC` to produce the JSON value
+`1776631488`.
 
 ## Run the tool
 
 Windows Command Prompt:
 
 ```bat
-tools\register-upstream.cmd VERSION SOURCE_DATE_EPOCH WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
+tools\register-upstream.cmd VERSION "SOURCE_DATE_EPOCH" WINDOWS_SHA1 WINDOWS_MD5 SOURCE_SHA1 SOURCE_MD5
 ```
 
 Linux or macOS:
 
 ```sh
-sh tools/register-upstream.sh VERSION SOURCE_DATE_EPOCH WINDOWS_SHA1 SOURCE_SHA1 WINDOWS_MD5 SOURCE_MD5
+sh tools/register-upstream.sh VERSION "SOURCE_DATE_EPOCH" WINDOWS_SHA1 WINDOWS_MD5 SOURCE_SHA1 SOURCE_MD5
 ```
 
 The tool downloads both archives, verifies the supplied SHA-1 and MD5 values,

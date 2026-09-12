@@ -5,10 +5,10 @@ if "%~6"=="" goto :usage
 if not "%~9"=="" goto :usage
 
 set "VERSION=%~1"
-set "EPOCH=%~2"
+set "SOURCE_DATE_UTC=%~2"
 set "WINDOWS_SHA1=%~3"
-set "SOURCE_SHA1=%~4"
-set "WINDOWS_MD5=%~5"
+set "WINDOWS_MD5=%~4"
+set "SOURCE_SHA1=%~5"
 set "SOURCE_MD5=%~6"
 set "KEEP_DOWNLOADS=0"
 if not "%~7"=="" (
@@ -19,12 +19,15 @@ if not "%~7"=="" (
 echo [1/7] Validating arguments and required system commands
 where curl.exe >nul 2>nul || (echo required system command not found: curl.exe>&2 & exit /b 1)
 where certutil.exe >nul 2>nul || (echo required system command not found: certutil.exe>&2 & exit /b 1)
+where powershell.exe >nul 2>nul || (echo required system command not found: powershell.exe>&2 & exit /b 1)
 echo(%VERSION%| findstr /r /x "[0-9][0-9.]*" >nul || (echo invalid NSIS version>&2 & exit /b 2)
 echo(%VERSION%| findstr "\." >nul || (echo NSIS version must contain a dot>&2 & exit /b 2)
 if "%VERSION:~0,1%"=="." (echo invalid NSIS version>&2 & exit /b 2)
 if "%VERSION:~-1%"=="." (echo invalid NSIS version>&2 & exit /b 2)
 if not "%VERSION:..=%"=="%VERSION%" (echo invalid NSIS version>&2 & exit /b 2)
-echo(%EPOCH%| findstr /r /x "[0-9][0-9]*" >nul || (echo source-date-epoch must be an integer>&2 & exit /b 2)
+set "EPOCH="
+for /f "usebackq delims=" %%I in (`powershell.exe -NoProfile -NonInteractive -Command "try { [DateTimeOffset]::ParseExact($env:SOURCE_DATE_UTC, 'yyyy-MM-dd HH:mm:ss ''UTC''', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).ToUnixTimeSeconds() } catch { exit 1 }"`) do set "EPOCH=%%I"
+if not defined EPOCH (echo source-date-epoch must be a valid UTC date with format YYYY-MM-DD HH:MM:SS UTC>&2 & exit /b 2)
 echo(%WINDOWS_SHA1%| findstr /r /i /x "[0-9a-f][0-9a-f]*" >nul || (echo invalid Windows SHA-1>&2 & exit /b 2)
 echo(%SOURCE_SHA1%| findstr /r /i /x "[0-9a-f][0-9a-f]*" >nul || (echo invalid source SHA-1>&2 & exit /b 2)
 echo(%WINDOWS_MD5%| findstr /r /i /x "[0-9a-f][0-9a-f]*" >nul || (echo invalid Windows MD5>&2 & exit /b 2)
@@ -100,8 +103,13 @@ echo       "fileName": "%WINDOWS_NAME%",
 echo       "url": "%WINDOWS_URL%",
 echo       "size": %WINDOWS_SIZE%,
 echo       "digests": {
-echo         "upstreamPublished": { "sha1": "%ACTUAL_WINDOWS_SHA1%", "md5": "%WINDOWS_MD5%" },
-echo         "locallyDerived": { "sha256": "%WINDOWS_SHA256%" }
+echo         "upstreamPublished": {
+echo           "sha1": "%ACTUAL_WINDOWS_SHA1%",
+echo           "md5": "%WINDOWS_MD5%"
+echo         },
+echo         "locallyDerived": {
+echo           "sha256": "%WINDOWS_SHA256%"
+echo         }
 echo       }
 echo     },
 echo     "sourceArchive": {
@@ -109,8 +117,13 @@ echo       "fileName": "%SOURCE_NAME%",
 echo       "url": "%SOURCE_URL%",
 echo       "size": %SOURCE_SIZE%,
 echo       "digests": {
-echo         "upstreamPublished": { "sha1": "%ACTUAL_SOURCE_SHA1%", "md5": "%SOURCE_MD5%" },
-echo         "locallyDerived": { "sha256": "%SOURCE_SHA256%" }
+echo         "upstreamPublished": {
+echo           "sha1": "%ACTUAL_SOURCE_SHA1%",
+echo           "md5": "%SOURCE_MD5%"
+echo         },
+echo         "locallyDerived": {
+echo           "sha256": "%SOURCE_SHA256%"
+echo         }
 echo       }
 echo     }
 echo   }
@@ -167,5 +180,5 @@ if "%CLEANUP%"=="1" if defined WORK if exist "%WORK%" (
 exit /b 0
 
 :usage
-echo usage: %~nx0 ^<version^> ^<source-date-epoch^> ^<windows-sha1^> ^<source-sha1^> ^<windows-md5^> ^<source-md5^> [--keep-downloads [directory]]>&2
+echo usage: %~nx0 ^<version^> ^<source-date-epoch^> ^<windows-sha1^> ^<windows-md5^> ^<source-sha1^> ^<source-md5^> [--keep-downloads [directory]]>&2
 exit /b 2

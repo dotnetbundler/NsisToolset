@@ -2,16 +2,16 @@
 set -eu
 
 usage() {
-  echo "usage: $0 <version> <source-date-epoch> <windows-sha1> <source-sha1> <windows-md5> <source-md5> [--keep-downloads [directory]]" >&2
+  echo "usage: $0 <version> <source-date-epoch> <windows-sha1> <windows-md5> <source-sha1> <source-md5> [--keep-downloads [directory]]" >&2
   exit 2
 }
 
 [ "$#" -ge 6 ] && [ "$#" -le 8 ] || usage
 version=$1
-epoch=$2
+source_date_utc=$2
 windows_sha1=$3
-source_sha1=$4
-windows_md5=$5
+windows_md5=$4
+source_sha1=$5
 source_md5=$6
 keep_downloads=false
 download_directory=
@@ -28,8 +28,8 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}$' || {
   echo "version must be a numeric NSIS version such as 3.12 or 3.06.1" >&2
   exit 2
 }
-printf '%s\n' "$epoch" | grep -Eq '^[0-9]+$' || {
-  echo "source-date-epoch must be an integer" >&2
+printf '%s\n' "$source_date_utc" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} UTC$' || {
+  echo "source-date-epoch must have format YYYY-MM-DD HH:MM:SS UTC" >&2
   exit 2
 }
 for value in "$windows_sha1" "$source_sha1"; do
@@ -45,12 +45,27 @@ for value in "$windows_md5" "$source_md5"; do
   }
 done
 
-for command_name in curl mktemp grep tr wc awk; do
+for command_name in curl mktemp grep tr wc awk date uname; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "required system command not found: $command_name" >&2
     exit 1
   }
 done
+
+case "$(uname -s)" in
+  Darwin)
+    epoch=$(LC_ALL=C date -j -u -f '%Y-%m-%d %H:%M:%S' "${source_date_utc% UTC}" +%s 2>/dev/null) || {
+      echo "source-date-epoch is not a valid UTC date" >&2
+      exit 2
+    }
+    ;;
+  *)
+    epoch=$(LC_ALL=C date -u -d "$source_date_utc" +%s 2>/dev/null) || {
+      echo "source-date-epoch is not a valid UTC date" >&2
+      exit 2
+    }
+    ;;
+esac
 
 hash_file() {
   algorithm=$1
@@ -145,8 +160,13 @@ cat >"$output" <<EOF
       "url": "$windows_url",
       "size": $windows_size,
       "digests": {
-        "upstreamPublished": { "sha1": "$actual_windows_sha1", "md5": "$windows_md5" },
-        "locallyDerived": { "sha256": "$windows_sha256" }
+        "upstreamPublished": {
+          "sha1": "$actual_windows_sha1",
+          "md5": "$windows_md5"
+        },
+        "locallyDerived": {
+          "sha256": "$windows_sha256"
+        }
       }
     },
     "sourceArchive": {
@@ -154,8 +174,13 @@ cat >"$output" <<EOF
       "url": "$source_url",
       "size": $source_size,
       "digests": {
-        "upstreamPublished": { "sha1": "$actual_source_sha1", "md5": "$source_md5" },
-        "locallyDerived": { "sha256": "$source_sha256" }
+        "upstreamPublished": {
+          "sha1": "$actual_source_sha1",
+          "md5": "$source_md5"
+        },
+        "locallyDerived": {
+          "sha256": "$source_sha256"
+        }
       }
     }
   }
