@@ -391,22 +391,23 @@ class ToolsetTests(unittest.TestCase):
 
     def test_workflow_runs_all_host_and_installer_smoke_jobs(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        native_job = workflow.split("  native-hosts-smoke:", 1)[1].split("\n  installer-smoke:", 1)[0]
-        matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^ }]+) \}", native_job)
+        hosts_job = workflow.split("  hosts-smoke:", 1)[1].split("\n  installer-smoke:", 1)[0]
+        matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^,]+), kind: ([^ }]+) \}", hosts_job)
         self.assertEqual(
             [
-                ("linux-x64", "ubuntu-24.04"),
-                ("linux-arm64", "ubuntu-24.04-arm"),
-                ("osx-x64", "macos-15-intel"),
-                ("osx-arm64", "macos-15"),
+                ("win-x86", "windows-2022", "windows"),
+                ("linux-x64", "ubuntu-24.04", "native"),
+                ("linux-arm64", "ubuntu-24.04-arm", "native"),
+                ("osx-x64", "macos-15-intel", "native"),
+                ("osx-arm64", "macos-15", "native"),
             ],
             matrix,
         )
-        install_job = workflow.split("  installer-smoke:", 1)[1].split("\n  assemble:", 1)[0]
+        install_job = workflow.split("  installer-smoke:", 1)[1].split("\n  assemble-and-release:", 1)[0]
         installers = re.findall(r"--installer artifacts/installers/installer-([^/]+)/", install_job)
         self.assertEqual(["win-x86", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"], installers)
-        assemble_job = workflow.split("  assemble:", 1)[1].split("\n  release:", 1)[0]
-        self.assertNotIn("    if: ${{ false }}", assemble_job)
+        assemble_job = workflow.split("  assemble-and-release:", 1)[1]
+        self.assertIn("if: github.event_name == 'push'", assemble_job)
 
 
 if __name__ == "__main__":

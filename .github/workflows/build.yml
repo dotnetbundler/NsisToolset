@@ -19,8 +19,8 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
-  # Resolve and validate the requested toolset version.
-  resolve:
+  # Resolve the requested version, then download and verify its upstream files.
+  prepare:
     runs-on: ubuntu-24.04
     outputs:
       toolset-version: ${{ steps.version.outputs.toolsetVersion }}
@@ -35,22 +35,12 @@ jobs:
         with:
           python-version: '3.12'
       - id: version
-        name: resolve version and upstream configuration.
+        name: Resolve version and upstream configuration
         env:
           REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.toolset-version || github.ref_name }}
         run: python -m build_tools.toolset_cli resolve-version --version "$REQUESTED_VERSION" --github-output "$GITHUB_OUTPUT"
-
-  # Download and verify both upstream archives once.
-  download:
-    needs: resolve
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.12'
-      - name: Download and verify
-        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" download --cache artifacts/upstream
+      - name: Download and verify upstream files
+        run: python -m build_tools.toolset_cli --upstream-config "${{ steps.version.outputs.upstreamConfig }}" --toolset-version "${{ steps.version.outputs.toolsetVersion }}" download --cache artifacts/upstream
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: verified-upstream
@@ -58,51 +48,19 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Stage common data, validate the Windows host, and smoke-test its launcher.
-  common-and-windows-host-smoke:
-    name: Common data + Windows host smoke
-    needs: [resolve, download]
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: verified-upstream
-          path: artifacts/upstream
-      - name: Stage common files and write root launchers
-        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-common --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
-      - name: Stage and validate the official Windows x86 host
-        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" stage-windows-host --archive "artifacts/upstream/${{ needs.resolve.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
-      - name: Verify and compile through the root Windows launcher
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" windows-smoke --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
-      - uses: actions/upload-artifact@v7.0.1
-        with:
-          name: windows-stage
-          path: artifacts/stage
-          if-no-files-found: error
-          retention-days: 2
-      - uses: actions/upload-artifact@v7.0.1
-        with:
-          name: installer-win-x86
-          path: artifacts/smoke/smoke-installer.exe
-          if-no-files-found: error
-          retention-days: 2
-
-  # Build and smoke-test each native Linux and macOS compiler.
-  native-hosts-smoke:
-    name: Native host smoke (${{ matrix.rid }})
-    needs: [resolve, download, common-and-windows-host-smoke]
+  # Stage common data and smoke-test all five hosts in parallel.
+  hosts-smoke:
+    name: Host smoke (${{ matrix.rid }})
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { rid: linux-x64, os: ubuntu-24.04 }
-          - { rid: linux-arm64, os: ubuntu-24.04-arm }
-          - { rid: osx-x64, os: macos-15-intel }
-          - { rid: osx-arm64, os: macos-15 }
+          - { rid: win-x86, os: windows-2022, kind: windows }
+          - { rid: linux-x64, os: ubuntu-24.04, kind: native }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm, kind: native }
+          - { rid: osx-x64, os: macos-15-intel, kind: native }
+          - { rid: osx-arm64, os: macos-15, kind: native }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -113,20 +71,35 @@ jobs:
         with:
           name: verified-upstream
           path: artifacts/upstream
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: windows-stage
-          path: artifacts/stage
+      - name: Stage common files and root launchers
+        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" stage-common --archive "artifacts/upstream/${{ needs.prepare.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
+      - if: matrix.kind == 'windows'
+        name: Stage and validate the official Windows x86 host
+        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" stage-windows-host --archive "artifacts/upstream/${{ needs.prepare.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
+      - if: matrix.kind == 'windows'
+        name: Compile through the Windows launcher
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" windows-smoke --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
       - if: runner.os == 'Linux'
         name: Install Linux compiler prerequisites
         run: sudo apt-get update && sudo apt-get install -y build-essential file libc6-dev zlib1g-dev
-      - name: Install the hash-pinned build tool
+      - if: matrix.kind == 'native'
+        name: Install the hash-pinned build tool
         run: python -m pip install --require-hashes -r requirements-build.txt
-      - name: Build twice and require identical compiler bytes
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" native-build-twice --archive "artifacts/upstream/${{ needs.resolve.outputs.source-archive }}" --data-root artifacts/stage/common --rid '${{ matrix.rid }}' --first artifacts/native-1 --second artifacts/native-2 --work artifacts/native-work
-      - name: Add the native host and compile through the root launcher
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" native-smoke --rid '${{ matrix.rid }}' --binary artifacts/native-1/makensis --metadata artifacts/native-1/build-metadata.json --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
-      - uses: actions/upload-artifact@v7.0.1
+      - if: matrix.kind == 'native'
+        name: Build twice and require identical compiler bytes
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" native-build-twice --archive "artifacts/upstream/${{ needs.prepare.outputs.source-archive }}" --data-root artifacts/stage/common --rid '${{ matrix.rid }}' --first artifacts/native-1 --second artifacts/native-2 --work artifacts/native-work
+      - if: matrix.kind == 'native'
+        name: Add the native host and compile through the root launcher
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" native-smoke --rid '${{ matrix.rid }}' --binary artifacts/native-1/makensis --metadata artifacts/native-1/build-metadata.json --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
+      - if: matrix.kind == 'windows'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-stage
+          path: artifacts/stage
+          if-no-files-found: error
+          retention-days: 2
+      - if: matrix.kind == 'native'
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: host-${{ matrix.rid }}
           path: artifacts/native-1
@@ -139,10 +112,10 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Install and uninstall every host-generated smoke installer on Windows.
+  # Every host emits a Windows installer, so installation is checked on Windows.
   installer-smoke:
     name: Installer smoke
-    needs: [common-and-windows-host-smoke, native-hosts-smoke]
+    needs: hosts-smoke
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7.0.1
@@ -164,10 +137,12 @@ jobs:
       - name: Install, verify, and uninstall the macOS ARM64 smoke package
         run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-osx-arm64/smoke-installer.exe --install-root artifacts/installed/osx-arm64
 
-  # Assemble and validate reproducible release assets on Linux.
-  assemble:
-    needs: [resolve, common-and-windows-host-smoke, native-hosts-smoke, installer-smoke]
+  # Assemble once all smoke checks pass; publish in-place only for version tags.
+  assemble-and-release:
+    needs: [prepare, hosts-smoke, installer-smoke]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -184,33 +159,18 @@ jobs:
       - name: Run the Python unit tests
         run: python -m unittest discover -s tests -v
       - name: Assemble and package twice with identical ZIP bytes
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts
       - name: Validate the final package after relocation to a path with spaces
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" release-package-smoke --archive "artifacts/dist/nsis-toolset-${{ needs.resolve.outputs.toolset-version }}.zip" --destination "artifacts/release package" --smoke "artifacts/release package smoke" --fixture fixtures/minimal.nsi
-      - uses: actions/upload-artifact@v7.0.1
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" release-package-smoke --archive "artifacts/dist/nsis-toolset-${{ needs.prepare.outputs.toolset-version }}.zip" --destination "artifacts/release package" --smoke "artifacts/release package smoke" --fixture fixtures/minimal.nsi
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: release-assets
           path: artifacts/dist
           if-no-files-found: error
           retention-days: 14
-
-  # Publish only assets validated from a matching pushed version tag.
-  release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [resolve, assemble]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: release-assets
-          path: artifacts/dist
-      - name: Revalidate the tag and publish immutable versioned assets
+      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        name: Revalidate the tag and publish immutable versioned assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.resolve.outputs.upstream-config }}" --toolset-version "${{ needs.resolve.outputs.toolset-version }}" publish --dist artifacts/dist
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" publish --dist artifacts/dist
