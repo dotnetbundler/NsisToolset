@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "upstreamVersion": "3.11",
+  "sourceDateEpoch": 1741475460,
+  "upstream": {
+    "windowsZip": {
+      "fileName": "nsis-3.11.zip",
+      "url": "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11.zip/download",
+      "size": 2361546,
+      "digests": {
+        "upstreamPublished": {
+          "sha1": "ef7ff767e5cbd9edd22add3a32c9b8f4500bb10d",
+          "md5": "b7c063bee3afc8127dca0fd64c4e22ce"
+        },
+        "locallyDerived": {
+          "sha256": "c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1"
+        }
+      }
+    },
+    "sourceArchive": {
+      "fileName": "nsis-3.11-src.tar.bz2",
+      "url": "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-src.tar.bz2/download",
+      "size": 1817928,
+      "digests": {
+        "upstreamPublished": {
+          "sha1": "63ddba57fe46b1e0a4810ece2a7980f069c031b6",
+          "md5": "63bdc1b7676c96486532c98c0b4d2fb5"
+        },
+        "locallyDerived": {
+          "sha256": "19e72062676ebdc67c11dc032ba80b979cdbffd3886c60b04bb442cdd401ff4b"
+        }
+      }
+    }
+  }
+}
