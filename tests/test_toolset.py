@@ -154,12 +154,16 @@ class ToolsetTests(unittest.TestCase):
             relative_root = root.relative_to(configuration.ROOT)
             archive = relative_root / "source.tar.bz2"
             archive.write_bytes(b"source")
+            data_root = relative_root / "stage/common"
+            (data_root / "Stubs").mkdir(parents=True)
+            (data_root / "Stubs/uninst").write_bytes(b"stub")
             config = {
                 "upstreamVersion": "3.12",
                 "sourceDateEpoch": 1776631488,
                 "upstream": {"sourceArchive": {}},
             }
             scons_prefixes = []
+            version_data_roots = []
 
             def simulate(command, **_kwargs):
                 if command[0] == "scons":
@@ -169,6 +173,7 @@ class ToolsetTests(unittest.TestCase):
                     (prefix / "makensis").write_bytes(b"compiler")
                     return mock.Mock(stdout="")
                 if "-VERSION" in command:
+                    version_data_roots.append(_kwargs["env"]["NSISDIR"])
                     return mock.Mock(stdout="v3.12\n")
                 if command[0] == "file":
                     return mock.Mock(stdout="ELF executable\n")
@@ -184,10 +189,11 @@ class ToolsetTests(unittest.TestCase):
                 mock.patch.object(native_build, "run", side_effect=simulate),
                 mock.patch.object(native_build, "write_metadata"),
             ):
-                native_build.build_native(config, archive, relative_root / "output", "linux-x64", relative_root / "work")
+                native_build.build_native(config, archive, data_root, relative_root / "output", "linux-x64", relative_root / "work")
 
             self.assertEqual([(root / "work/install").resolve()], scons_prefixes)
             self.assertTrue(scons_prefixes[0].is_absolute())
+            self.assertEqual([str((root / "stage/common").resolve())], version_data_roots)
 
     def test_common_and_windows_host_are_staged_independently(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -394,6 +400,17 @@ class ToolsetTests(unittest.TestCase):
             parser = create_toolset_parser() if tokens[2].endswith("toolset_cli") else create_ci_parser()
             with self.subTest(command=command):
                 parser.parse_args(tokens[3:])
+
+    def test_workflow_limits_native_canary_scope(self):
+        workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        native_job = workflow.split("  native-hosts:", 1)[1].split("\n  install-test:", 1)[0]
+        matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^ }]+) \}", native_job)
+        self.assertEqual([("linux-x64", "ubuntu-24.04")], matrix)
+        install_job = workflow.split("  install-test:", 1)[1].split("\n  assemble:", 1)[0]
+        installers = re.findall(r"--installer artifacts/installers/installer-([^/]+)/", install_job)
+        self.assertEqual(["win-x86", "linux-x64"], installers)
+        assemble_job = workflow.split("  assemble:", 1)[1].split("\n  release:", 1)[0]
+        self.assertIn("    if: ${{ false }}", assemble_job)
 
 
 if __name__ == "__main__":

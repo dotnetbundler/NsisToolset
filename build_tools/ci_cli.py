@@ -21,6 +21,7 @@ class Arguments(argparse.Namespace):
     fixture: Path
     smoke: Path
     archive: Path
+    data_root: Path
     rid: str
     first: Path
     second: Path
@@ -50,6 +51,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     command = commands.add_parser("native-build-twice")
     command.add_argument("--archive", type=Path, required=True)
+    command.add_argument("--data-root", type=Path, required=True)
     command.add_argument("--rid", required=True)
     command.add_argument("--first", type=Path, required=True)
     command.add_argument("--second", type=Path, required=True)
@@ -95,7 +97,7 @@ def main() -> None:
     if args.command == "windows-smoke":
         smoke_tests.windows_smoke(config, args.stage, args.fixture, args.smoke)
     elif args.command == "native-build-twice":
-        native_build.build_twice(config, args.archive, args.rid, args.first, args.second, args.work)
+        native_build.build_twice(config, args.archive, args.data_root, args.rid, args.first, args.second, args.work)
     elif args.command == "native-smoke":
         smoke_tests.native_smoke(config, args.rid, args.binary, args.metadata, args.stage, args.fixture, args.smoke)
     elif args.command == "assemble":

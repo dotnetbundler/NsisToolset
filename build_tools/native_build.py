@@ -68,13 +68,16 @@ def safe_extract_source(archive: Path, destination: Path) -> Path:
     return source
 
 
-def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path) -> None:
+def build_native(config: dict, archive: Path, data_root: Path, output: Path, rid: str, work: Path) -> None:
     if rid not in {"linux-x64", "linux-arm64", "osx-x64", "osx-arm64"}:
         raise RuntimeError(f"unsupported RID: {rid}")
     upstream.checked_file(archive, config["upstream"]["sourceArchive"])
     recreate(work)
     recreate(output)
     source = safe_extract_source(archive, work / "src")
+    data_root = data_root.resolve()
+    if not (data_root / "Stubs/uninst").is_file():
+        raise RuntimeError(f"NSIS data root does not contain Stubs/uninst: {data_root}")
     install = (work / "install").resolve()
     install.mkdir()
 
@@ -84,6 +87,10 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
         raise RuntimeError(f"unsupported NSIS numeric version: {version}")
     components += ["0"] * (4 - len(components))
     environment = os.environ.copy()
+    # makensis initializes its default compressor and loads Stubs/uninst before
+    # it handles -VERSION, so even the version probe requires a complete data
+    # root when NSIS_CONFIG_CONST_DATA_PATH is disabled.
+    environment["NSISDIR"] = str(data_root)
     environment["SOURCE_DATE_EPOCH"] = str(config["sourceDateEpoch"])
     command = [
         "scons",
@@ -118,7 +125,7 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
     binary = output / "makensis"
     shutil.copy2(install / "makensis", binary)
     binary.chmod(0o755)
-    version_result = run([binary, "-VERSION"], capture=True)
+    version_result = run([binary, "-VERSION"], env=environment, capture=True)
     (output / "version.txt").write_text(version_result.stdout, encoding="utf-8", newline="\n")
     if version_result.stdout.strip() != f"v{version}":
         raise RuntimeError(f"built compiler reported {version_result.stdout.strip()!r}")
@@ -155,9 +162,9 @@ def build_native(config: dict, archive: Path, output: Path, rid: str, work: Path
     )
 
 
-def build_twice(config: dict, archive: Path, rid: str, first: Path, second: Path, work: Path) -> None:
-    build_native(config, archive, first, rid, work / f"{rid}-1")
-    build_native(config, archive, second, rid, work / f"{rid}-2")
+def build_twice(config: dict, archive: Path, data_root: Path, rid: str, first: Path, second: Path, work: Path) -> None:
+    build_native(config, archive, data_root, first, rid, work / f"{rid}-1")
+    build_native(config, archive, data_root, second, rid, work / f"{rid}-2")
     if (first / "makensis").read_bytes() != (second / "makensis").read_bytes():
         raise RuntimeError(f"repeated {rid} builds produced different compiler bytes")
     print(f"repeated {rid} builds are byte-identical")
