@@ -181,8 +181,10 @@ class ToolsetTests(unittest.TestCase):
             stage = Path(temporary)
             staging.write_root_launchers(stage)
             windows = (stage / "makensis.cmd").read_text()
+            windows_bytes = (stage / "makensis.cmd").read_bytes()
             posix = (stage / "makensis").read_text()
             self.assertIn("hosts\\win-x86\\makensis.exe", windows)
+            self.assertNotIn(b"\n", windows_bytes.replace(b"\r\n", b""))
             for value in ("Linux:x86_64", "Linux:aarch64", "Darwin:x86_64", "Darwin:arm64"):
                 self.assertIn(value, posix)
             self.assertIn("unsupported host", posix)

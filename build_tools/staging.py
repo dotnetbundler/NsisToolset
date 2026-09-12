@@ -26,7 +26,12 @@ def write_root_launchers(stage: Path) -> None:
     windows_path = stage / "makensis.cmd"
     posix_path = stage / "makensis"
     stage.mkdir(parents=True, exist_ok=True)
-    windows_path.write_text("@echo off\r\nsetlocal\r\n" 'set "NSISDIR=%~dp0common"\r\n' '"%~dp0hosts\\win-x86\\makensis.exe" %*\r\nexit /b %ERRORLEVEL%\r\n', encoding="utf-8", newline="")
+    windows_path.write_text(r"""@echo off
+setlocal
+set "NSISDIR=%~dp0common"
+"%~dp0hosts\win-x86\makensis.exe" %*
+exit /b %ERRORLEVEL%
+""", encoding="utf-8", newline="\r\n")
     posix_path.write_text("""#!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
