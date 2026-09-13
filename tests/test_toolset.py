@@ -726,6 +726,8 @@ class WorkflowTests(ToolsetTestCase):
                 ("ubuntu-22.04-arm64", "ubuntu-22.04-arm"),
                 ("ubuntu-24.04-x64", "ubuntu-24.04"),
                 ("ubuntu-24.04-arm64", "ubuntu-24.04-arm"),
+                ("ubuntu-26.04-x64", "ubuntu-26.04"),
+                ("ubuntu-26.04-arm64", "ubuntu-26.04-arm"),
                 ("macos-14-arm64", "macos-14"),
                 ("macos-15-arm64", "macos-15"),
                 ("macos-15-x64", "macos-15-intel"),

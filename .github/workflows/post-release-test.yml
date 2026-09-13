@@ -32,6 +32,8 @@ jobs:
           - { id: ubuntu-22.04-arm64, os: ubuntu-22.04-arm }
           - { id: ubuntu-24.04-x64, os: ubuntu-24.04 }
           - { id: ubuntu-24.04-arm64, os: ubuntu-24.04-arm }
+          - { id: ubuntu-26.04-x64, os: ubuntu-26.04 }
+          - { id: ubuntu-26.04-arm64, os: ubuntu-26.04-arm }
           - { id: macos-14-arm64, os: macos-14 }
           - { id: macos-15-arm64, os: macos-15 }
           - { id: macos-15-x64, os: macos-15-intel }
