@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from . import packaging, staging
+from . import native_build, packaging, staging
 from .ci_support import recreate, require_version, run
 
 
@@ -28,6 +28,31 @@ def native_smoke(config: dict, rid: str, binary: Path, metadata: Path, stage: Pa
     launcher = stage.resolve() / "makensis"
     launcher.chmod(0o755)
     _compile_with_launcher(config, stage, fixture, smoke, [launcher])
+
+
+def upstream_example_smoke(config: dict, example: Path, smoke: Path, launcher: list[str | Path]) -> None:
+    """Compile the official bigtest example, matching Homebrew's functional test."""
+    recreate(smoke)
+    output = (smoke / "bigtest-installer.exe").resolve()
+    require_version([*launcher, "-VERSION"], config["upstreamVersion"], cwd=smoke)
+    run([*launcher, example.resolve(), f"-XOutFile {output}"], cwd=smoke)
+    if not output.is_file():
+        raise RuntimeError("official bigtest example did not produce an installer")
+
+
+def host_smoke(config: dict, config_path: Path, upstream_config: Path, toolset_version: str, cache: Path, rid: str, artifacts: Path, fixture: Path) -> None:
+    archive = cache / config["upstream"]["windowsZip"]["fileName"]
+    stage = artifacts / "stage"
+    upstream_root = staging.stage_common(config, archive, stage, artifacts / "work")
+    if rid == "win-x86":
+        staging.stage_windows_host(config, archive, stage, artifacts / "work")
+        launcher = ["cmd.exe", "/d", "/c", stage.resolve() / "makensis.cmd"]
+        windows_smoke(config, stage, fixture, artifacts / "smoke")
+    else:
+        native_build.build_host(config, config_path, upstream_config, toolset_version, cache, stage / "common", rid, artifacts)
+        launcher = [stage.resolve() / "makensis"]
+        native_smoke(config, rid, artifacts / "native-1/makensis", artifacts / "native-1/build-metadata.json", stage, fixture, artifacts / "smoke")
+    upstream_example_smoke(config, upstream_root / "Examples/bigtest.nsi", artifacts / "upstream-example-smoke", launcher)
 
 
 def release_package_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:

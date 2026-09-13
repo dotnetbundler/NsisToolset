@@ -78,7 +78,7 @@ def _extract_windows(config: dict, archive: Path, work: Path, clean: bool) -> Pa
     return upstream.safe_extract_zip(archive, extract)
 
 
-def stage_common(config: dict, archive: Path, stage: Path, work: Path) -> None:
+def stage_common(config: dict, archive: Path, stage: Path, work: Path) -> Path:
     recreate(stage)
     upstream_root = _extract_windows(config, archive, work, clean=True)
     common = stage / "common"
@@ -90,6 +90,7 @@ def stage_common(config: dict, archive: Path, stage: Path, work: Path) -> None:
         _copy_item(source, common / name)
     write_root_launchers(stage)
     print(f"staged official common data and root launchers at {stage}")
+    return upstream_root
 
 
 def stage_windows_host(config: dict, archive: Path, stage: Path, work: Path) -> None:

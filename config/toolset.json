@@ -17,7 +17,7 @@
       "compatibleHostRids": ["linux-x64"],
       "requiredEnvironment": { "NSISDIR": { "toolsetRelativePath": "common" } },
       "unixExecutable": true,
-      "minimumOs": "Linux kernel 3.2 target baseline; no glibc runtime dependency; CI-verified on Ubuntu 24.04"
+      "minimumOs": "Linux on x86-64 with glibc 2.17 or later"
     },
     "linux-arm64": {
       "directory": "linux-arm64",
@@ -26,7 +26,7 @@
       "compatibleHostRids": ["linux-arm64"],
       "requiredEnvironment": { "NSISDIR": { "toolsetRelativePath": "common" } },
       "unixExecutable": true,
-      "minimumOs": "Linux kernel 3.7 target baseline; no glibc runtime dependency; CI-verified on Ubuntu 24.04 ARM64"
+      "minimumOs": "Linux on ARM64 with glibc 2.17 or later"
     },
     "osx-x64": {
       "directory": "osx-x64",

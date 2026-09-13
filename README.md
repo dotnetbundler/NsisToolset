@@ -59,6 +59,10 @@ If the extraction tool did not preserve executable permissions, run:
 chmod +x makensis hosts/*/makensis
 ```
 
+#### Linux compatibility
+
+The Linux hosts require glibc 2.17 or later. Alpine Linux and other musl-based systems are not supported.
+
 ## Release process
 
 1. Register the config by following [Register an upstream release](docs/upstream-registration.md); skip this step if the release version already has a config.

@@ -21,13 +21,9 @@ class Arguments(argparse.Namespace):
     fixture: Path
     smoke: Path
     archive: Path
+    cache: Path
     data_root: Path
     rid: str
-    first: Path
-    second: Path
-    work: Path
-    binary: Path
-    metadata: Path
     hosts: Path
     artifacts: Path
     destination: Path
@@ -43,26 +39,17 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--toolset-version")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    command = commands.add_parser("windows-smoke")
-    command.add_argument("--stage", type=Path, required=True)
+    command = commands.add_parser("host-smoke")
+    command.add_argument("--cache", type=Path, required=True)
+    command.add_argument("--rid", required=True)
+    command.add_argument("--artifacts", type=Path, required=True)
     command.add_argument("--fixture", type=Path, required=True)
-    command.add_argument("--smoke", type=Path, required=True)
 
     command = commands.add_parser("native-build-twice")
-    command.add_argument("--archive", type=Path, required=True)
+    command.add_argument("--cache", type=Path, required=True)
     command.add_argument("--data-root", type=Path, required=True)
     command.add_argument("--rid", required=True)
-    command.add_argument("--first", type=Path, required=True)
-    command.add_argument("--second", type=Path, required=True)
-    command.add_argument("--work", type=Path, required=True)
-
-    command = commands.add_parser("native-smoke")
-    command.add_argument("--rid", required=True)
-    command.add_argument("--binary", type=Path, required=True)
-    command.add_argument("--metadata", type=Path, required=True)
-    command.add_argument("--stage", type=Path, required=True)
-    command.add_argument("--fixture", type=Path, required=True)
-    command.add_argument("--smoke", type=Path, required=True)
+    command.add_argument("--artifacts", type=Path, required=True)
 
     command = commands.add_parser("assemble")
     command.add_argument("--stage", type=Path, required=True)
@@ -92,12 +79,10 @@ def main() -> None:
     if args.upstream_config is None or args.toolset_version is None:
         parser.error("--upstream-config and --toolset-version are required")
     config = configuration.merged_config(args.config, args.upstream_config, args.toolset_version)
-    if args.command == "windows-smoke":
-        smoke_tests.windows_smoke(config, args.stage, args.fixture, args.smoke)
+    if args.command == "host-smoke":
+        smoke_tests.host_smoke(config, args.config, args.upstream_config, args.toolset_version, args.cache, args.rid, args.artifacts, args.fixture)
     elif args.command == "native-build-twice":
-        native_build.build_twice(config, args.archive, args.data_root, args.rid, args.first, args.second, args.work)
-    elif args.command == "native-smoke":
-        smoke_tests.native_smoke(config, args.rid, args.binary, args.metadata, args.stage, args.fixture, args.smoke)
+        native_build.build_twice_from_cache(config, args.cache, args.data_root, args.rid, args.artifacts)
     elif args.command == "assemble":
         release_tasks.assemble(config, args.stage, args.hosts, args.artifacts)
     elif args.command == "release-package-smoke":

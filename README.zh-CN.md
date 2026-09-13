@@ -8,7 +8,7 @@ NsisToolset 将 NSIS 打包为便携式 Windows、Linux 和 macOS 工具集。�
 
 从对应的 [GitHub Release](https://github.com/dotnetbundler/NsisToolset/releases) 下载 `nsis-toolset-<version>.zip`。
 
-### 校验(可选)
+### 校验（可选）
 
 下载 `.sha256` 文件用于校验。
 
@@ -59,10 +59,14 @@ Linux 或 macOS：
 chmod +x makensis hosts/*/makensis
 ```
 
+#### Linux 兼容性
+
+Linux 主机需要 glibc 2.17 或更高版本，不支持 Alpine Linux 等使用 musl 的系统。
+
 ## 发布流程
 
 1. 按照 [登记上游版本](docs/upstream-registration.md) 登记配置，如发布版本已有配置则无需重新登记。
-2. (可选)本地测试：`python -m unittest discover -s tests -v`
+2. （可选）运行本地测试：`python -m unittest discover -s tests -v`
 3. 推送 `v<upstream-version>-<local-label>`（如 `v3.12-r1`） 格式的标签，工作流会自动发布 Release。
 
 ## 许可证

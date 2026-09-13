@@ -12,10 +12,10 @@ Register a new upstream version with [upstream-registration.md](upstream-registr
 
 - Native compilers use the official source without patches.
 - Every host uses the shared `common/` directory through `NSISDIR`.
-- Linux compilers are static and their GNU ABI notes are checked.
+- Linux compilers are built in pinned manylinux2014 containers for a glibc 2.17 baseline. They dynamically link glibc and zlib, statically link the C++ runtime, and use the host system's matching iconv modules; imported GLIBC symbol versions and dynamic dependencies are checked during the build.
 - macOS deployment targets are defined by the build configuration.
 - Build dependencies are pinned in `requirements-build.txt`.
 - Native compilers and the final ZIP are built twice and compared byte for byte.
-- Every host and generated installer passes smoke tests before publication.
+- Every host reports the expected version and compiles both the repository's minimal installer and the official `Examples/bigtest.nsi`; Linux also compiles a Simplified Chinese language-file test. Every generated installer is installed, checked, and uninstalled before publication.
 
 The Windows runtime comes from the verified official Windows ZIP.

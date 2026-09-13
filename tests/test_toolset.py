@@ -150,7 +150,7 @@ class ToolsetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 native_build.safe_extract_source(unsafe, root / "unsafe-out")
 
-    def test_native_build_uses_absolute_prefix_data_root_and_static_stdio_symbol(self):
+    def test_native_build_targets_glibc_2_17_and_static_cpp_runtime(self):
         with tempfile.TemporaryDirectory(dir=configuration.ROOT) as temporary:
             root = Path(temporary)
             relative_root = root.relative_to(configuration.ROOT)
@@ -165,6 +165,7 @@ class ToolsetTests(unittest.TestCase):
                 "upstream": {"sourceArchive": {}},
             }
             scons_prefixes = []
+            scons_compilers = []
             scons_link_flags = []
             version_data_roots = []
 
@@ -173,18 +174,28 @@ class ToolsetTests(unittest.TestCase):
                     arguments = [str(item) for item in command]
                     prefix = Path(next(item.removeprefix("PREFIX=") for item in arguments if item.startswith("PREFIX=")))
                     scons_prefixes.append(prefix)
+                    scons_compilers.append([item for item in arguments if item.startswith(("CC=", "CXX="))])
                     scons_link_flags.append(next(item for item in arguments if item.startswith("APPEND_LINKFLAGS=")))
                     (prefix / "makensis").write_bytes(b"compiler")
                     return mock.Mock(stdout="")
                 if "-VERSION" in command:
                     version_data_roots.append(_kwargs["env"]["NSISDIR"])
                     return mock.Mock(stdout="v3.12\n")
+                if Path(command[0]).name == "makensis":
+                    (Path(_kwargs["cwd"]) / "legacy-codepage-smoke.exe").write_bytes(b"installer")
+                    return mock.Mock(stdout="")
                 if command[0] == "file":
                     return mock.Mock(stdout="ELF executable\n")
                 if command[0] == "readelf":
-                    return mock.Mock(stdout="ABI: 3.2.0\n")
+                    if "--dynamic" in command:
+                        return mock.Mock(stdout="(NEEDED) Shared library: [libc.so.6]\n")
+                    if "--program-headers" in command:
+                        return mock.Mock(stdout="  INTERP 0x000000\n")
+                    if "--version-info" in command:
+                        return mock.Mock(stdout="Name: GLIBC_2.17\n")
+                    return mock.Mock(stdout="ELF report\n")
                 if command[0] == "ldd":
-                    return mock.Mock(stdout="statically linked\n", stderr="")
+                    return mock.Mock(stdout="libc.so.6 => /lib/libc.so.6\n", stderr="")
                 self.fail(f"unexpected command: {command}")
 
             with (
@@ -193,12 +204,35 @@ class ToolsetTests(unittest.TestCase):
                 mock.patch.object(native_build, "run", side_effect=simulate),
                 mock.patch.object(native_build, "write_metadata"),
             ):
-                native_build.build_native(config, archive, data_root, relative_root / "output", "linux-x64", relative_root / "work")
+                native_build.build_native(config, archive, data_root, relative_root / "output", "linux-x64", relative_root / "native-work")
 
-            self.assertEqual([(root / "work/install").resolve()], scons_prefixes)
+            self.assertEqual([(root / "native-work/install").resolve()], scons_prefixes)
             self.assertTrue(scons_prefixes[0].is_absolute())
-            self.assertEqual(["APPEND_LINKFLAGS=-static -Wl,-u,_IO_wfile_doallocate"], scons_link_flags)
+            self.assertEqual([["CC=gcc", "CXX=g++"]], scons_compilers)
+            self.assertEqual(["APPEND_LINKFLAGS=-static-libgcc -static-libstdc++"], scons_link_flags)
             self.assertEqual([str((root / "stage/common").resolve())], version_data_roots)
+
+    def test_linux_container_build_is_dispatched_by_python(self):
+        with tempfile.TemporaryDirectory(dir=configuration.ROOT) as temporary:
+            root = Path(temporary)
+            relative_root = root.relative_to(configuration.ROOT)
+            with mock.patch.object(native_build, "run") as run:
+                native_build.build_linux_in_container(
+                    configuration.DEFAULT_CONFIG,
+                    relative_root / "upstream.json",
+                    "3.12-r1",
+                    relative_root / "cache",
+                    relative_root / "common",
+                    "linux-x64",
+                    relative_root / "artifacts",
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual("docker", command[0])
+            self.assertEqual(native_build.MANYLINUX_IMAGES["linux-x64"], command[7])
+            self.assertIn("/opt/python/cp312-cp312/bin/python", command)
+            self.assertIn("native-build-twice", command)
+            self.assertNotIn("--container", command)
 
     def test_common_and_windows_host_are_staged_independently(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -266,6 +300,17 @@ class ToolsetTests(unittest.TestCase):
                 smoke_tests.native_smoke(config, "linux-x64", binary, metadata, stage, fixture, root / "native-smoke")
                 self.assertEqual(stage.resolve() / "makensis", version_mock.call_args.args[0][0])
                 self.assertEqual(stage.resolve() / "makensis", run_mock.call_args.args[0][0])
+
+            example = root / "bigtest.nsi"
+            example.write_text("example")
+
+            def produce_bigtest(command, **_kwargs):
+                output = next(item.removeprefix("-XOutFile ") for item in map(str, command) if item.startswith("-XOutFile "))
+                Path(output).write_bytes(b"installer")
+
+            with mock.patch.object(smoke_tests, "run", side_effect=produce_bigtest) as run_mock, mock.patch.object(smoke_tests, "require_version"):
+                smoke_tests.upstream_example_smoke(config, example, root / "upstream-example-smoke", [stage.resolve() / "makensis"])
+                self.assertIn(example.resolve(), run_mock.call_args.args[0])
 
             release_stage, release_config = self.make_stage(root / "release", "3.12-r1")
             archive = root / "release.zip"
@@ -376,7 +421,7 @@ class ToolsetTests(unittest.TestCase):
         toolset_commands = set(create_toolset_parser()._subparsers._group_actions[0].choices)
         ci_commands = set(create_ci_parser()._subparsers._group_actions[0].choices)
         self.assertEqual({"resolve-version", "download", "stage-common", "stage-windows-host"}, toolset_commands)
-        self.assertEqual({"windows-smoke", "native-build-twice", "native-smoke", "assemble", "release-package-smoke", "test-installer", "publish"}, ci_commands)
+        self.assertEqual({"host-smoke", "native-build-twice", "assemble", "release-package-smoke", "test-installer", "publish"}, ci_commands)
 
     def test_workflow_python_commands_match_cli_parsers(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -392,17 +437,18 @@ class ToolsetTests(unittest.TestCase):
     def test_workflow_runs_all_host_and_installer_smoke_jobs(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         hosts_job = workflow.split("  hosts-smoke:", 1)[1].split("\n  installer-smoke:", 1)[0]
-        matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^,]+), kind: ([^ }]+) \}", hosts_job)
+        matrix = re.findall(r"- \{ rid: ([^,]+), os: ([^ }]+) \}", hosts_job)
         self.assertEqual(
             [
-                ("win-x86", "windows-2022", "windows"),
-                ("linux-x64", "ubuntu-24.04", "native"),
-                ("linux-arm64", "ubuntu-24.04-arm", "native"),
-                ("osx-x64", "macos-15-intel", "native"),
-                ("osx-arm64", "macos-15", "native"),
+                ("win-x86", "windows-2022"),
+                ("linux-x64", "ubuntu-24.04"),
+                ("linux-arm64", "ubuntu-24.04-arm"),
+                ("osx-x64", "macos-15-intel"),
+                ("osx-arm64", "macos-15"),
             ],
             matrix,
         )
+        self.assertEqual(1, len(re.findall(r"^\s*run:", hosts_job, flags=re.MULTILINE)))
         install_job = workflow.split("  installer-smoke:", 1)[1].split("\n  assemble-and-release:", 1)[0]
         installers = re.findall(r"--installer artifacts/installers/installer-([^/]+)/", install_job)
         self.assertEqual(["win-x86", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"], installers)

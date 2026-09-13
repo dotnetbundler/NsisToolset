@@ -24,11 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       toolset-version: ${{ steps.version.outputs.toolsetVersion }}
-      upstream-version: ${{ steps.version.outputs.upstreamVersion }}
       upstream-config: ${{ steps.version.outputs.upstreamConfig }}
-      source-date-epoch: ${{ steps.version.outputs.sourceDateEpoch }}
-      windows-archive: ${{ steps.version.outputs.windowsArchive }}
-      source-archive: ${{ steps.version.outputs.sourceArchive }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -56,11 +52,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { rid: win-x86, os: windows-2022, kind: windows }
-          - { rid: linux-x64, os: ubuntu-24.04, kind: native }
-          - { rid: linux-arm64, os: ubuntu-24.04-arm, kind: native }
-          - { rid: osx-x64, os: macos-15-intel, kind: native }
-          - { rid: osx-arm64, os: macos-15, kind: native }
+          - { rid: win-x86, os: windows-2022 }
+          - { rid: linux-x64, os: ubuntu-24.04 }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: osx-x64, os: macos-15-intel }
+          - { rid: osx-arm64, os: macos-15 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -71,34 +67,16 @@ jobs:
         with:
           name: verified-upstream
           path: artifacts/upstream
-      - name: Stage common files and root launchers
-        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" stage-common --archive "artifacts/upstream/${{ needs.prepare.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
-      - if: matrix.kind == 'windows'
-        name: Stage and validate the official Windows x86 host
-        run: python -m build_tools.toolset_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" stage-windows-host --archive "artifacts/upstream/${{ needs.prepare.outputs.windows-archive }}" --stage artifacts/stage --work artifacts/work
-      - if: matrix.kind == 'windows'
-        name: Compile through the Windows launcher
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" windows-smoke --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
-      - if: runner.os == 'Linux'
-        name: Install Linux compiler prerequisites
-        run: sudo apt-get update && sudo apt-get install -y build-essential file libc6-dev zlib1g-dev
-      - if: matrix.kind == 'native'
-        name: Install the hash-pinned build tool
-        run: python -m pip install --require-hashes -r requirements-build.txt
-      - if: matrix.kind == 'native'
-        name: Build twice and require identical compiler bytes
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" native-build-twice --archive "artifacts/upstream/${{ needs.prepare.outputs.source-archive }}" --data-root artifacts/stage/common --rid '${{ matrix.rid }}' --first artifacts/native-1 --second artifacts/native-2 --work artifacts/native-work
-      - if: matrix.kind == 'native'
-        name: Add the native host and compile through the root launcher
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" native-smoke --rid '${{ matrix.rid }}' --binary artifacts/native-1/makensis --metadata artifacts/native-1/build-metadata.json --stage artifacts/stage --fixture fixtures/minimal.nsi --smoke artifacts/smoke
-      - if: matrix.kind == 'windows'
+      - name: Build and smoke-test the host
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" host-smoke --cache artifacts/upstream --rid '${{ matrix.rid }}' --artifacts artifacts --fixture fixtures/minimal.nsi
+      - if: matrix.rid == 'win-x86'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-stage
           path: artifacts/stage
           if-no-files-found: error
           retention-days: 2
-      - if: matrix.kind == 'native'
+      - if: matrix.rid != 'win-x86'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: host-${{ matrix.rid }}
