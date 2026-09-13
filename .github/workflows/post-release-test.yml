@@ -27,7 +27,7 @@ jobs:
         include:
           - { id: windows-2022-x64, os: windows-2022 }
           - { id: windows-2025-x64, os: windows-2025 }
-          - { id: windows-11-arm64, os: windows-11-arm }
+          - { id: windows-11-arm64, os: windows-11-vs2026-arm }
           - { id: ubuntu-22.04-x64, os: ubuntu-22.04 }
           - { id: ubuntu-22.04-arm64, os: ubuntu-22.04-arm }
           - { id: ubuntu-24.04-x64, os: ubuntu-24.04 }
@@ -67,7 +67,7 @@ jobs:
         include:
           - { id: windows-2022-x64, os: windows-2022 }
           - { id: windows-2025-x64, os: windows-2025 }
-          - { id: windows-11-arm64, os: windows-11-arm }
+          - { id: windows-11-arm64, os: windows-11-vs2026-arm }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:

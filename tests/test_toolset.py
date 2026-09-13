@@ -188,8 +188,9 @@ class ConfigurationAndUpstreamTests(ToolsetTestCase):
 
 
 class NativeBuildTests(ToolsetTestCase):
-    def test_cp936_smoke_fixture_rejects_codepage_fallback(self):
+    def test_cp936_smoke_fixture_loads_simplified_chinese_with_warnings_as_errors(self):
         fixture = (configuration.ROOT / "fixtures/cp936-codepage-smoke.nsi").read_text(encoding="utf-8")
+        self.assertTrue(fixture.isascii())
         self.assertIn("!pragma warning error all", fixture)
         self.assertIn("SimpChinese.nlf", fixture)
         self.assertIn('OutFile "cp936-codepage-smoke.exe"', fixture)
@@ -407,10 +408,17 @@ class SmokeTests(ToolsetTestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive = root / "nsis-toolset-test-r1.zip"
-            archive.write_bytes(b"published bytes")
             checksum = root / f"{archive.name}.sha256"
+            with self.assertRaisesRegex(RuntimeError, "ZIP is missing"):
+                published_release.verify_assets(archive, checksum)
+            archive.write_bytes(b"published bytes")
+            with self.assertRaisesRegex(RuntimeError, "checksum is missing"):
+                published_release.verify_assets(archive, checksum)
             checksum.write_text(f"{upstream.sha256(archive)}  {archive.name}\n", encoding="ascii")
             published_release.verify_assets(archive, checksum)
+            checksum.write_text("not a checksum\n", encoding="ascii")
+            with self.assertRaisesRegex(RuntimeError, "does not name"):
+                published_release.verify_assets(archive, checksum)
             checksum.write_text(f"{upstream.sha256(archive)}  wrong-name.zip\n", encoding="ascii")
             with self.assertRaisesRegex(RuntimeError, "does not name"):
                 published_release.verify_assets(archive, checksum)
@@ -518,6 +526,40 @@ class SmokeTests(ToolsetTestCase):
 
 
 class PackagingAndReleaseTests(ToolsetTestCase):
+    def test_publish_requires_matching_tag_and_exact_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary)
+            archive = dist / "nsis-toolset-3.12-r1.zip"
+            checksum = dist / f"{archive.name}.sha256"
+            archive.write_bytes(b"archive")
+            checksum.write_text("checksum")
+            config = {"toolsetVersion": "3.12-r1", "upstreamVersion": "3.12"}
+
+            with mock.patch.dict(os.environ, {"GITHUB_REF_NAME": "v3.12-r1"}), mock.patch.object(release, "run") as run:
+                release.publish(config, dist)
+            self.assertEqual(
+                [
+                    "gh",
+                    "release",
+                    "create",
+                    "v3.12-r1",
+                    archive,
+                    checksum,
+                    "--verify-tag",
+                    "--title",
+                    "NSIS Toolset 3.12-r1",
+                    "--notes",
+                    "NSIS 3.12 toolset for Windows, Linux, and macOS.",
+                ],
+                run.call_args.args[0],
+            )
+
+            with mock.patch.dict(os.environ, {"GITHUB_REF_NAME": "v3.12-r2"}), self.assertRaisesRegex(RuntimeError, "tag mismatch"):
+                release.publish(config, dist)
+            (dist / "unexpected.txt").write_text("unexpected")
+            with mock.patch.dict(os.environ, {"GITHUB_REF_NAME": "v3.12-r1"}), self.assertRaisesRegex(RuntimeError, "unexpected release assets"):
+                release.publish(config, dist)
+
     def test_post_release_dispatch_uses_the_default_branch_workflow(self):
         with mock.patch.object(release, "run") as run:
             release.start_post_release_tests("v3.12-r1")
@@ -532,7 +574,6 @@ class PackagingAndReleaseTests(ToolsetTestCase):
             ],
             run.call_args.args[0],
         )
-        self.assertNotIn("--ref", run.call_args.args[0])
 
     def test_stage_validation_rejects_non_runtime_content(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -635,7 +676,7 @@ class WorkflowTests(ToolsetTestCase):
         commands = []
         for workflow in workflows:
             commands.extend(re.findall(r"^\s*run: (python -m build_tools\.ci_cli .+)$", workflow.read_text(encoding="utf-8"), flags=re.MULTILINE))
-        self.assertGreaterEqual(len(commands), 8)
+        self.assertEqual(8, len(commands))
         for command in commands:
             normalized = re.sub(r"\$\{\{[^}]+\}\}", "value", command).replace("$REQUESTED_VERSION", "v3.12-r1").replace("$GITHUB_OUTPUT", "output").replace("$GITHUB_SHA", "commit")
             tokens = shlex.split(normalized)
@@ -669,6 +710,7 @@ class WorkflowTests(ToolsetTestCase):
         workflow = (configuration.ROOT / ".github/workflows/post-release-test.yml").read_text(encoding="utf-8")
         self.assertIn("release:\n    types: [published]", workflow)
         self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release-tag }}", workflow)
         self.assertEqual(2, workflow.count("ref: ${{ github.event.repository.default_branch }}"))
         self.assertNotIn("ref: ${{ env.RELEASE_TAG }}", workflow)
         compile_job = workflow.split("  compile-published-release:", 1)[1].split("\n  install-published-release:", 1)[0]
@@ -679,7 +721,7 @@ class WorkflowTests(ToolsetTestCase):
             [
                 ("windows-2022-x64", "windows-2022"),
                 ("windows-2025-x64", "windows-2025"),
-                ("windows-11-arm64", "windows-11-arm"),
+                ("windows-11-arm64", "windows-11-vs2026-arm"),
                 ("ubuntu-22.04-x64", "ubuntu-22.04"),
                 ("ubuntu-22.04-arm64", "ubuntu-22.04-arm"),
                 ("ubuntu-24.04-x64", "ubuntu-24.04"),
@@ -693,16 +735,17 @@ class WorkflowTests(ToolsetTestCase):
             compile_matrix,
         )
         install_job = workflow.split("  install-published-release:", 1)[1]
+        self.assertIn("needs: compile-published-release", install_job)
+        self.assertIn("pattern: published-installer-*", install_job)
         install_matrix = re.findall(r"- \{ id: ([^,]+), os: ([^ }]+) \}", install_job)
         self.assertEqual(
             [
                 ("windows-2022-x64", "windows-2022"),
                 ("windows-2025-x64", "windows-2025"),
-                ("windows-11-arm64", "windows-11-arm"),
+                ("windows-11-arm64", "windows-11-vs2026-arm"),
             ],
             install_matrix,
         )
-        self.assertNotIn("expected-count", install_job)
         self.assertIn("published-installers-smoke", install_job)
 
 
