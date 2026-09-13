@@ -19,7 +19,6 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
-  # Resolve the requested version, then download and verify its upstream files.
   prepare:
     runs-on: ubuntu-24.04
     outputs:
@@ -31,12 +30,10 @@ jobs:
         with:
           python-version: '3.12'
       - id: version
-        name: Resolve version and upstream configuration
+        name: Resolve version, download, and verify upstream files
         env:
           REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.toolset-version || github.ref_name }}
-        run: python -m build_tools.toolset_cli resolve-version --version "$REQUESTED_VERSION" --github-output "$GITHUB_OUTPUT"
-      - name: Download and verify upstream files
-        run: python -m build_tools.toolset_cli --upstream-config "${{ steps.version.outputs.upstreamConfig }}" --toolset-version "${{ steps.version.outputs.toolsetVersion }}" download --cache artifacts/upstream
+        run: python -m build_tools.ci_cli prepare --version "$REQUESTED_VERSION" --github-output "$GITHUB_OUTPUT" --cache artifacts/upstream
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: verified-upstream
@@ -44,7 +41,6 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Stage common data and smoke-test all five hosts in parallel.
   hosts-smoke:
     name: Host smoke (${{ matrix.rid }})
     needs: prepare
@@ -90,10 +86,9 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Every host emits a Windows installer, so installation is checked on Windows.
   installer-smoke:
     name: Installer smoke
-    needs: hosts-smoke
+    needs: [prepare, hosts-smoke]
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7.0.1
@@ -104,18 +99,9 @@ jobs:
         with:
           pattern: installer-*
           path: artifacts/installers
-      - name: Install, verify, and uninstall the Windows x86 smoke package
-        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-win-x86/smoke-installer.exe --install-root artifacts/installed/win-x86
-      - name: Install, verify, and uninstall the Linux x64 smoke package
-        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-linux-x64/smoke-installer.exe --install-root artifacts/installed/linux-x64
-      - name: Install, verify, and uninstall the Linux ARM64 smoke package
-        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-linux-arm64/smoke-installer.exe --install-root artifacts/installed/linux-arm64
-      - name: Install, verify, and uninstall the macOS x64 smoke package
-        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-osx-x64/smoke-installer.exe --install-root artifacts/installed/osx-x64
-      - name: Install, verify, and uninstall the macOS ARM64 smoke package
-        run: python -m build_tools.ci_cli test-installer --installer artifacts/installers/installer-osx-arm64/smoke-installer.exe --install-root artifacts/installed/osx-arm64
+      - name: Install, verify, and uninstall every smoke package
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" installer-smoke --installers artifacts/installers --install-root artifacts/installed
 
-  # Assemble once all smoke checks pass; publish in-place only for version tags.
   assemble-and-release:
     needs: [prepare, hosts-smoke, installer-smoke]
     runs-on: ubuntu-24.04
@@ -136,10 +122,8 @@ jobs:
           path: artifacts/hosts
       - name: Run the Python unit tests
         run: python -m unittest discover -s tests -v
-      - name: Assemble and package twice with identical ZIP bytes
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" assemble --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts
-      - name: Validate the final package after relocation to a path with spaces
-        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" release-package-smoke --archive "artifacts/dist/nsis-toolset-${{ needs.prepare.outputs.toolset-version }}.zip" --destination "artifacts/release package" --smoke "artifacts/release package smoke" --fixture fixtures/minimal.nsi
+      - name: Assemble twice and verify the final package
+        run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" assemble-and-verify --stage artifacts/stage --hosts artifacts/hosts --artifacts artifacts --fixture fixtures/minimal.nsi
       - if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7.0.1
         with:

@@ -12,12 +12,21 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from build_tools import configuration, native_build, packaging, release_tasks, smoke_tests, staging, upstream
-from build_tools.ci_cli import create_parser as create_ci_parser
-from build_tools.toolset_cli import create_parser as create_toolset_parser
+from build_tools import (
+    ci_cli,
+    configuration,
+    linux_build,
+    native_audit,
+    native_build,
+    packaging,
+    release,
+    smoke_tests,
+    staging,
+    upstream,
+)
 
 
-class ToolsetTests(unittest.TestCase):
+class ToolsetTestCase(unittest.TestCase):
     def make_stage(self, root: Path, toolset_version: str = "test-r1"):
         stage = root / "stage"
         for name in ("Include", "Plugins", "Stubs"):
@@ -86,6 +95,8 @@ class ToolsetTests(unittest.TestCase):
         config = {"upstream": {"windowsZip": spec}}
         return archive, config
 
+
+class ConfigurationAndUpstreamTests(ToolsetTestCase):
     def test_version_resolution_uses_longest_registered_upstream(self):
         with tempfile.TemporaryDirectory() as temporary:
             configs = Path(temporary)
@@ -104,6 +115,48 @@ class ToolsetTests(unittest.TestCase):
             for version in ("v3.12", "v3.12-../bad", "release-3.12-r1"):
                 with self.subTest(version=version), self.assertRaises(RuntimeError):
                     configuration.resolve_version(version, configs)
+
+    def test_prepare_resolves_version_and_downloads_upstream(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            upstream_dir = root / "upstream"
+            upstream_dir.mkdir()
+            base = root / "toolset.json"
+            base.write_text(json.dumps({"hosts": {}}))
+            upstream_config = upstream_dir / "3.12.json"
+            upstream_config.write_text(
+                json.dumps(
+                    {
+                        "upstreamVersion": "3.12",
+                        "sourceDateEpoch": 1,
+                        "upstream": {
+                            "windowsZip": {"fileName": "nsis.zip"},
+                            "sourceArchive": {"fileName": "nsis.tar.bz2"},
+                        },
+                    }
+                )
+            )
+            output = root / "github-output"
+            cache = root / "cache"
+            arguments = [
+                "ci_cli",
+                "--config",
+                str(base),
+                "prepare",
+                "--version",
+                "v3.12-r1",
+                "--upstream-dir",
+                str(upstream_dir),
+                "--github-output",
+                str(output),
+                "--cache",
+                str(cache),
+            ]
+            with mock.patch.object(sys, "argv", arguments), mock.patch.object(upstream, "download") as download:
+                ci_cli.main()
+            self.assertIn("toolsetVersion=3.12-r1", output.read_text())
+            self.assertEqual("3.12-r1", download.call_args.args[0]["toolsetVersion"])
+            self.assertEqual(cache, download.call_args.args[1])
 
     def test_upstream_check_requires_size_published_sha1_and_derived_sha256(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -131,6 +184,14 @@ class ToolsetTests(unittest.TestCase):
                     bundle.writestr(member, b"bad")
                 with self.subTest(member=member), self.assertRaises(RuntimeError):
                     upstream.safe_extract_zip_flat(archive, root / f"out-{index}")
+
+
+class NativeBuildTests(ToolsetTestCase):
+    def test_cp936_smoke_fixture_rejects_codepage_fallback(self):
+        fixture = (configuration.ROOT / "fixtures/cp936-codepage-smoke.nsi").read_text(encoding="utf-8")
+        self.assertIn("!pragma warning error all", fixture)
+        self.assertIn("SimpChinese.nlf", fixture)
+        self.assertIn('OutFile "cp936-codepage-smoke.exe"', fixture)
 
     def test_source_archive_extraction_requires_one_safe_root(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -169,6 +230,8 @@ class ToolsetTests(unittest.TestCase):
             scons_compilers = []
             scons_link_flags = []
             version_data_roots = []
+            compiled_scripts = []
+            cp936_outputs = []
 
             def simulate(command, **_kwargs):
                 if command[:3] == [sys.executable, "-m", "SCons"]:
@@ -183,7 +246,10 @@ class ToolsetTests(unittest.TestCase):
                     version_data_roots.append(_kwargs["env"]["NSISDIR"])
                     return mock.Mock(stdout="v3.12\n")
                 if Path(command[0]).name == "makensis":
-                    (Path(_kwargs["cwd"]) / "legacy-codepage-smoke.exe").write_bytes(b"installer")
+                    compiled_scripts.append(Path(command[1]))
+                    output = Path(next(str(item).removeprefix("-XOutFile ") for item in command if str(item).startswith("-XOutFile ")))
+                    cp936_outputs.append(output)
+                    output.write_bytes(b"installer")
                     return mock.Mock(stdout="")
                 if command[0] == "file":
                     return mock.Mock(stdout="ELF executable\n")
@@ -203,22 +269,25 @@ class ToolsetTests(unittest.TestCase):
                 mock.patch.object(upstream, "checked_file"),
                 mock.patch.object(native_build, "safe_extract_source", return_value=relative_root / "src/nsis"),
                 mock.patch.object(native_build, "run", side_effect=simulate),
-                mock.patch.object(native_build, "write_metadata"),
+                mock.patch.object(native_audit, "run", side_effect=simulate),
+                mock.patch.object(native_audit, "_write_metadata"),
             ):
-                native_build.build_native(config, archive, data_root, relative_root / "output", "linux-x64", relative_root / "native-work")
+                native_build.build_compiler(config, archive, data_root, relative_root / "output", "linux-x64", relative_root / "native-work")
 
             self.assertEqual([(root / "native-work/install").resolve()], scons_prefixes)
             self.assertTrue(scons_prefixes[0].is_absolute())
             self.assertEqual([["CC=gcc", "CXX=g++"]], scons_compilers)
             self.assertEqual(["APPEND_LINKFLAGS=-static-libgcc -static-libstdc++"], scons_link_flags)
             self.assertEqual([str((root / "stage/common").resolve())], version_data_roots)
+            self.assertEqual([(configuration.ROOT / "fixtures/cp936-codepage-smoke.nsi").resolve()], compiled_scripts)
+            self.assertEqual([(root / "native-work/cp936-codepage-smoke.exe").resolve()], cp936_outputs)
 
     def test_linux_container_build_is_dispatched_by_python(self):
         with tempfile.TemporaryDirectory(dir=configuration.ROOT) as temporary:
             root = Path(temporary)
             relative_root = root.relative_to(configuration.ROOT)
-            with mock.patch.object(native_build, "run") as run:
-                native_build.build_linux_in_container(
+            with mock.patch.object(linux_build, "run") as run:
+                linux_build.run_in_container(
                     configuration.DEFAULT_CONFIG,
                     relative_root / "upstream.json",
                     "3.12-r1",
@@ -230,11 +299,13 @@ class ToolsetTests(unittest.TestCase):
 
             command = run.call_args.args[0]
             self.assertEqual("docker", command[0])
-            self.assertEqual(native_build.MANYLINUX_IMAGES["linux-x64"], command[7])
+            self.assertEqual(linux_build.MANYLINUX_IMAGES["linux-x64"], command[7])
             self.assertIn("/opt/python/cp312-cp312/bin/python", command)
             self.assertIn("native-build-twice", command)
             self.assertNotIn("--container", command)
 
+
+class StagingTests(ToolsetTestCase):
     def test_common_and_windows_host_are_staged_independently(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -276,6 +347,8 @@ class ToolsetTests(unittest.TestCase):
                 self.assertIn(value, posix)
             self.assertIn("unsupported host", posix)
 
+
+class SmokeTests(ToolsetTestCase):
     def test_smoke_tests_invoke_only_root_launchers(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -341,11 +414,28 @@ class ToolsetTests(unittest.TestCase):
                         child.unlink()
                     install_root.rmdir()
 
-            with mock.patch.object(release_tasks, "run", side_effect=simulate):
-                release_tasks.test_installer(installer, install_root)
+            with mock.patch.object(smoke_tests, "run", side_effect=simulate):
+                smoke_tests.test_installer(installer, install_root)
             self.assertEqual(f"/D={install_root.resolve()}", commands[0][-1])
             self.assertFalse(install_root.exists())
 
+    def test_installer_smoke_covers_every_configured_host(self):
+        config = {"hosts": {rid: {} for rid in ("win-x86", "linux-x64", "osx-arm64")}}
+        installers = Path("artifacts/installers")
+        install_root = Path("artifacts/installed")
+        with mock.patch.object(smoke_tests, "test_installer") as test_installer:
+            smoke_tests.test_all_installers(config, installers, install_root)
+        self.assertEqual(
+            [
+                mock.call(installers / "installer-win-x86/smoke-installer.exe", install_root / "win-x86"),
+                mock.call(installers / "installer-linux-x64/smoke-installer.exe", install_root / "linux-x64"),
+                mock.call(installers / "installer-osx-arm64/smoke-installer.exe", install_root / "osx-arm64"),
+            ],
+            test_installer.call_args_list,
+        )
+
+
+class PackagingAndReleaseTests(ToolsetTestCase):
     def test_stage_validation_rejects_non_runtime_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -399,7 +489,7 @@ class ToolsetTests(unittest.TestCase):
                 (binary.parent / "build-metadata.json").write_text(json.dumps(metadata))
                 staged_binary.unlink()
                 staged_binary.parent.rmdir()
-            release_tasks.assemble(config, stage, hosts, artifacts)
+            release.assemble(config, stage, hosts, artifacts)
             dist = artifacts / "dist"
             expected = {
                 "nsis-toolset-test-r1.zip",
@@ -418,22 +508,21 @@ class ToolsetTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 packaging.validate_stage(config, stage)
 
+
+class WorkflowTests(ToolsetTestCase):
     def test_cli_parsers_expose_only_current_commands(self):
-        toolset_commands = set(create_toolset_parser()._subparsers._group_actions[0].choices)
-        ci_commands = set(create_ci_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual({"resolve-version", "download", "stage-common", "stage-windows-host"}, toolset_commands)
-        self.assertEqual({"host-smoke", "native-build-twice", "assemble", "release-package-smoke", "test-installer", "publish"}, ci_commands)
+        ci_commands = set(ci_cli.create_parser()._subparsers._group_actions[0].choices)
+        self.assertEqual({"prepare", "host-smoke", "native-build-twice", "installer-smoke", "assemble-and-verify", "publish"}, ci_commands)
 
     def test_workflow_python_commands_match_cli_parsers(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        commands = re.findall(r"^\s*run: (python -m build_tools\.(?:toolset_cli|ci_cli) .+)$", workflow, flags=re.MULTILINE)
-        self.assertGreaterEqual(len(commands), 10)
+        commands = re.findall(r"^\s*run: (python -m build_tools\.ci_cli .+)$", workflow, flags=re.MULTILINE)
+        self.assertGreaterEqual(len(commands), 5)
         for command in commands:
             normalized = re.sub(r"\$\{\{[^}]+\}\}", "value", command).replace("$REQUESTED_VERSION", "v3.12-r1").replace("$GITHUB_OUTPUT", "output").replace("$GITHUB_SHA", "commit")
             tokens = shlex.split(normalized)
-            parser = create_toolset_parser() if tokens[2].endswith("toolset_cli") else create_ci_parser()
             with self.subTest(command=command):
-                parser.parse_args(tokens[3:])
+                ci_cli.create_parser().parse_args(tokens[3:])
 
     def test_workflow_runs_all_host_and_installer_smoke_jobs(self):
         workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -451,8 +540,8 @@ class ToolsetTests(unittest.TestCase):
         )
         self.assertEqual(1, len(re.findall(r"^\s*run:", hosts_job, flags=re.MULTILINE)))
         install_job = workflow.split("  installer-smoke:", 1)[1].split("\n  assemble-and-release:", 1)[0]
-        installers = re.findall(r"--installer artifacts/installers/installer-([^/]+)/", install_job)
-        self.assertEqual(["win-x86", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"], installers)
+        self.assertEqual(1, len(re.findall(r"^\s*run:", install_job, flags=re.MULTILINE)))
+        self.assertIn("installer-smoke --installers artifacts/installers", install_job)
         assemble_job = workflow.split("  assemble-and-release:", 1)[1]
         self.assertIn("if: github.event_name == 'push'", assemble_job)
 

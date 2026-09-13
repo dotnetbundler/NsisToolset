@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import shutil
 import time
 import urllib.request
@@ -64,7 +65,7 @@ def download(config: dict, cache: Path) -> None:
                 print(f"downloaded and verified {name}: {destination.name}")
                 last_error = None
                 break
-            except Exception as error:
+            except (OSError, RuntimeError, http.client.HTTPException) as error:
                 last_error = error
                 temporary.unlink(missing_ok=True)
                 if attempt < 3:

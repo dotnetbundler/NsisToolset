@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 from . import native_build, packaging, staging
@@ -58,3 +59,28 @@ def host_smoke(config: dict, config_path: Path, upstream_config: Path, toolset_v
 def release_package_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:
     packaging.verify_zip(config, archive, destination)
     _compile_with_launcher(config, destination, fixture, smoke, [destination.resolve() / "makensis"])
+
+
+def test_installer(installer: Path, install_root: Path) -> None:
+    """Silently install, verify, and uninstall one generated smoke installer."""
+    if not installer.is_file():
+        raise RuntimeError(f"missing smoke installer: {installer}")
+    if install_root.exists():
+        shutil.rmtree(install_root)
+    install_root.parent.mkdir(parents=True, exist_ok=True)
+    run([installer.resolve(), "/S", f"/D={install_root.resolve()}"])
+    if not (install_root / "installed.txt").is_file():
+        raise RuntimeError(f"install failed: {installer}")
+
+    run([install_root / "uninstall.exe", "/S"])
+    deadline = time.monotonic() + 10
+    while install_root.exists() and time.monotonic() < deadline:
+        time.sleep(0.25)
+    if install_root.exists():
+        raise RuntimeError(f"uninstall left files: {installer}")
+
+
+def test_all_installers(config: dict, installers: Path, install_root: Path) -> None:
+    """Run installers produced by every configured compiler host."""
+    for rid in config["hosts"]:
+        test_installer(installers / f"installer-{rid}" / "smoke-installer.exe", install_root / rid)

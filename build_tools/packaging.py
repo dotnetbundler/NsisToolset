@@ -76,7 +76,7 @@ def deterministic_zip(config: dict, stage: Path, destination: Path, epoch: int) 
                 bundle.writestr(info, source.read(), compresslevel=9)
 
 
-def package(config: dict, stage: Path, dist: Path) -> None:
+def package(config: dict, stage: Path, dist: Path) -> Path:
     validate_stage(config, stage)
     name = f"nsis-toolset-{config['toolsetVersion']}.zip"
     archive = dist / name
@@ -84,6 +84,7 @@ def package(config: dict, stage: Path, dist: Path) -> None:
     checksum = upstream.sha256(archive)
     (dist / f"{name}.sha256").write_text(f"{checksum}  {name}\n", encoding="ascii", newline="\n")
     print(f"created {archive} ({checksum})")
+    return archive
 
 
 def verify_zip(config: dict, archive: Path, destination: Path) -> None:
