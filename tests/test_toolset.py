@@ -710,6 +710,7 @@ class WorkflowTests(ToolsetTestCase):
 
     def test_post_release_workflow_uses_published_assets_and_stable_matrix(self):
         workflow = (configuration.ROOT / ".github/workflows/post-release-test.yml").read_text(encoding="utf-8")
+        self.assertIn("run-name: Post-release test ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release-tag }}", workflow)
         self.assertIn("release:\n    types: [published]", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release-tag }}", workflow)
