@@ -393,8 +393,10 @@ class SmokeTests(ToolsetTestCase):
             packaging.deterministic_zip(release_config, release_stage, archive, release_config["sourceDateEpoch"])
             for platform_name, expected_prefix in (("nt", ["cmd.exe", "/d", "/c"]), ("posix", [])):
                 destination = root / f"release package {platform_name}"
+                platform = mock.Mock()
+                platform.name = platform_name
                 with (
-                    mock.patch.object(smoke_tests.os, "name", platform_name),
+                    mock.patch.object(smoke_tests, "os", platform),
                     mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock,
                     mock.patch.object(smoke_tests, "require_version") as version_mock,
                 ):
