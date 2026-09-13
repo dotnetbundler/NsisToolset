@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import stat
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -170,7 +171,7 @@ class ToolsetTests(unittest.TestCase):
             version_data_roots = []
 
             def simulate(command, **_kwargs):
-                if command[0] == "scons":
+                if command[:3] == [sys.executable, "-m", "SCons"]:
                     arguments = [str(item) for item in command]
                     prefix = Path(next(item.removeprefix("PREFIX=") for item in arguments if item.startswith("PREFIX=")))
                     scons_prefixes.append(prefix)

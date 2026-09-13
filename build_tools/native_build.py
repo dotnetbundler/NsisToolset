@@ -44,7 +44,7 @@ def write_metadata(*, rid: str, binary: Path, version_file: Path, file_report: P
         },
         "toolchain": {
             "compiler": subprocess.run([environment.get("CXX", "c++"), "--version"], text=True, capture_output=True, env=environment, check=True).stdout.splitlines()[0],
-            "scons": subprocess.run(["scons", "--version"], text=True, capture_output=True, env=environment, check=True).stdout.splitlines()[0],
+            "scons": subprocess.run([sys.executable, "-m", "SCons", "--version"], text=True, capture_output=True, env=environment, check=True).stdout.splitlines()[0],
         },
         "buildParameters": {
             "version": upstream_version,
@@ -212,7 +212,9 @@ def build_native(config: dict, archive: Path, data_root: Path, output: Path, rid
     environment["NSISDIR"] = str(data_root)
     environment["SOURCE_DATE_EPOCH"] = str(config["sourceDateEpoch"])
     command = [
-        "scons",
+        sys.executable,
+        "-m",
+        "SCons",
         "-C",
         source,
         "-j2",
