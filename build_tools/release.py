@@ -55,3 +55,17 @@ def publish(config: dict, dist: Path) -> None:
             f"NSIS {config['upstreamVersion']} toolset for Windows, Linux, and macOS.",
         ]
     )
+
+
+def start_post_release_tests(tag: str) -> None:
+    """Dispatch the post-release workflow after publication succeeds."""
+    run(
+        [
+            "gh",
+            "workflow",
+            "run",
+            "post-release-test.yml",
+            "--field",
+            f"release-tag={tag}",
+        ]
+    )

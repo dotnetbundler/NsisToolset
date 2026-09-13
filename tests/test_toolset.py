@@ -19,6 +19,7 @@ from build_tools import (
     native_audit,
     native_build,
     packaging,
+    published_release,
     release,
     smoke_tests,
     staging,
@@ -389,11 +390,92 @@ class SmokeTests(ToolsetTestCase):
             release_stage, release_config = self.make_stage(root / "release", "3.12-r1")
             archive = root / "release.zip"
             packaging.deterministic_zip(release_config, release_stage, archive, release_config["sourceDateEpoch"])
-            destination = root / "release package with spaces"
-            with mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock, mock.patch.object(smoke_tests, "require_version") as version_mock:
-                smoke_tests.release_package_smoke(release_config, archive, destination, root / "release-smoke", fixture)
-                self.assertEqual(destination.resolve() / "makensis", version_mock.call_args.args[0][0])
-                self.assertEqual(destination.resolve() / "makensis", run_mock.call_args.args[0][0])
+            for platform_name, expected_prefix in (("nt", ["cmd.exe", "/d", "/c"]), ("posix", [])):
+                destination = root / f"release package {platform_name}"
+                with (
+                    mock.patch.object(smoke_tests.os, "name", platform_name),
+                    mock.patch.object(smoke_tests, "run", side_effect=produce_installer) as run_mock,
+                    mock.patch.object(smoke_tests, "require_version") as version_mock,
+                ):
+                    smoke_tests.release_package_smoke(release_config, archive, destination, root / f"release-smoke-{platform_name}", fixture)
+                    launcher_name = "makensis.cmd" if platform_name == "nt" else "makensis"
+                    expected = [*expected_prefix, destination.resolve() / launcher_name]
+                    self.assertEqual([*expected, "-VERSION"], version_mock.call_args.args[0])
+                    self.assertEqual(expected, run_mock.call_args.args[0][:-1])
+
+    def test_published_release_requires_matching_checksum(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "nsis-toolset-test-r1.zip"
+            archive.write_bytes(b"published bytes")
+            checksum = root / f"{archive.name}.sha256"
+            checksum.write_text(f"{upstream.sha256(archive)}  {archive.name}\n", encoding="ascii")
+            published_release.verify_assets(archive, checksum)
+            checksum.write_text(f"{upstream.sha256(archive)}  wrong-name.zip\n", encoding="ascii")
+            with self.assertRaisesRegex(RuntimeError, "does not name"):
+                published_release.verify_assets(archive, checksum)
+            checksum.write_text(f"{'0' * 64}  {archive.name}\n", encoding="ascii")
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                published_release.verify_assets(archive, checksum)
+
+    def test_published_release_smoke_downloads_only_versioned_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifacts = root / "artifacts"
+            with (
+                mock.patch.object(published_release, "run") as download,
+                mock.patch.object(published_release, "verify_assets") as verify_assets,
+                mock.patch.object(smoke_tests, "release_package_smoke") as release_smoke,
+            ):
+                published_release.download_verify_and_compile(
+                    configuration.DEFAULT_CONFIG,
+                    configuration.DEFAULT_UPSTREAM_DIR,
+                    "v3.12-r1",
+                    "owner/repository",
+                    artifacts,
+                    configuration.ROOT / "fixtures/minimal.nsi",
+                )
+            archive = artifacts / "published-release/nsis-toolset-3.12-r1.zip"
+            checksum = artifacts / "published-release/nsis-toolset-3.12-r1.zip.sha256"
+            self.assertEqual(
+                [
+                    "gh",
+                    "release",
+                    "download",
+                    "v3.12-r1",
+                    "--repo",
+                    "owner/repository",
+                    "--dir",
+                    artifacts / "published-release",
+                    "--pattern",
+                    archive.name,
+                    "--pattern",
+                    checksum.name,
+                ],
+                download.call_args.args[0],
+            )
+            verify_assets.assert_called_once_with(archive, checksum)
+            self.assertEqual(archive, release_smoke.call_args.args[1])
+
+    def test_published_installer_smoke_runs_every_downloaded_installer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installers = root / "installers"
+            for name in ("installer-a", "installer-b"):
+                path = installers / name / "smoke-installer.exe"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"installer")
+            with mock.patch.object(smoke_tests, "test_installer") as test_installer:
+                smoke_tests.test_published_installers(installers, root / "installed")
+                self.assertEqual(
+                    [
+                        mock.call(installers / "installer-a/smoke-installer.exe", root / "installed/installer-a"),
+                        mock.call(installers / "installer-b/smoke-installer.exe", root / "installed/installer-b"),
+                    ],
+                    test_installer.call_args_list,
+                )
+            with self.assertRaisesRegex(RuntimeError, "no published-package installers"):
+                smoke_tests.test_published_installers(root / "empty", root / "installed")
 
     def test_installer_uses_requested_artifact_directory_and_uninstalls(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -436,6 +518,22 @@ class SmokeTests(ToolsetTestCase):
 
 
 class PackagingAndReleaseTests(ToolsetTestCase):
+    def test_post_release_dispatch_uses_the_default_branch_workflow(self):
+        with mock.patch.object(release, "run") as run:
+            release.start_post_release_tests("v3.12-r1")
+        self.assertEqual(
+            [
+                "gh",
+                "workflow",
+                "run",
+                "post-release-test.yml",
+                "--field",
+                "release-tag=v3.12-r1",
+            ],
+            run.call_args.args[0],
+        )
+        self.assertNotIn("--ref", run.call_args.args[0])
+
     def test_stage_validation_rejects_non_runtime_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -512,12 +610,32 @@ class PackagingAndReleaseTests(ToolsetTestCase):
 class WorkflowTests(ToolsetTestCase):
     def test_cli_parsers_expose_only_current_commands(self):
         ci_commands = set(ci_cli.create_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual({"prepare", "host-smoke", "native-build-twice", "installer-smoke", "assemble-and-verify", "publish"}, ci_commands)
+        registered_commands = set(ci_cli.DIRECT_COMMANDS) | set(ci_cli.CONFIGURED_COMMANDS)
+        self.assertEqual(
+            {
+                "prepare",
+                "host-smoke",
+                "native-build-twice",
+                "installer-smoke",
+                "published-release-smoke",
+                "published-installers-smoke",
+                "dispatch-post-release-tests",
+                "assemble-and-verify",
+                "publish",
+            },
+            ci_commands,
+        )
+        self.assertEqual(ci_commands, registered_commands)
 
     def test_workflow_python_commands_match_cli_parsers(self):
-        workflow = (configuration.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        commands = re.findall(r"^\s*run: (python -m build_tools\.ci_cli .+)$", workflow, flags=re.MULTILINE)
-        self.assertGreaterEqual(len(commands), 5)
+        workflows = [
+            configuration.ROOT / ".github/workflows/build.yml",
+            configuration.ROOT / ".github/workflows/post-release-test.yml",
+        ]
+        commands = []
+        for workflow in workflows:
+            commands.extend(re.findall(r"^\s*run: (python -m build_tools\.ci_cli .+)$", workflow.read_text(encoding="utf-8"), flags=re.MULTILINE))
+        self.assertGreaterEqual(len(commands), 8)
         for command in commands:
             normalized = re.sub(r"\$\{\{[^}]+\}\}", "value", command).replace("$REQUESTED_VERSION", "v3.12-r1").replace("$GITHUB_OUTPUT", "output").replace("$GITHUB_SHA", "commit")
             tokens = shlex.split(normalized)
@@ -544,6 +662,48 @@ class WorkflowTests(ToolsetTestCase):
         self.assertIn("installer-smoke --installers artifacts/installers", install_job)
         assemble_job = workflow.split("  assemble-and-release:", 1)[1]
         self.assertIn("if: github.event_name == 'push'", assemble_job)
+        self.assertIn("dispatch-post-release-tests --tag", assemble_job)
+        self.assertLess(assemble_job.index(" publish --dist "), assemble_job.index("dispatch-post-release-tests --tag"))
+
+    def test_post_release_workflow_uses_published_assets_and_stable_matrix(self):
+        workflow = (configuration.ROOT / ".github/workflows/post-release-test.yml").read_text(encoding="utf-8")
+        self.assertIn("release:\n    types: [published]", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertEqual(2, workflow.count("ref: ${{ github.event.repository.default_branch }}"))
+        self.assertNotIn("ref: ${{ env.RELEASE_TAG }}", workflow)
+        compile_job = workflow.split("  compile-published-release:", 1)[1].split("\n  install-published-release:", 1)[0]
+        self.assertIn("published-release-smoke --tag", compile_job)
+        self.assertNotIn("gh release download", compile_job)
+        compile_matrix = re.findall(r"- \{ id: ([^,]+), os: ([^ }]+) \}", compile_job)
+        self.assertEqual(
+            [
+                ("windows-2022-x64", "windows-2022"),
+                ("windows-2025-x64", "windows-2025"),
+                ("windows-11-arm64", "windows-11-arm"),
+                ("ubuntu-22.04-x64", "ubuntu-22.04"),
+                ("ubuntu-22.04-arm64", "ubuntu-22.04-arm"),
+                ("ubuntu-24.04-x64", "ubuntu-24.04"),
+                ("ubuntu-24.04-arm64", "ubuntu-24.04-arm"),
+                ("macos-14-arm64", "macos-14"),
+                ("macos-15-arm64", "macos-15"),
+                ("macos-15-x64", "macos-15-intel"),
+                ("macos-26-arm64", "macos-26"),
+                ("macos-26-x64", "macos-26-intel"),
+            ],
+            compile_matrix,
+        )
+        install_job = workflow.split("  install-published-release:", 1)[1]
+        install_matrix = re.findall(r"- \{ id: ([^,]+), os: ([^ }]+) \}", install_job)
+        self.assertEqual(
+            [
+                ("windows-2022-x64", "windows-2022"),
+                ("windows-2025-x64", "windows-2025"),
+                ("windows-11-arm64", "windows-11-arm"),
+            ],
+            install_matrix,
+        )
+        self.assertNotIn("expected-count", install_job)
+        self.assertIn("published-installers-smoke", install_job)
 
 
 if __name__ == "__main__":

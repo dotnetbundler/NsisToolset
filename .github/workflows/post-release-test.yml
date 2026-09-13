@@ -1,0 +1,85 @@
+name: post-release-test
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Existing release tag, for example v3.12-r1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release-tag }}
+
+jobs:
+  compile-published-release:
+    name: Compile published Release (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: windows-2022-x64, os: windows-2022 }
+          - { id: windows-2025-x64, os: windows-2025 }
+          - { id: windows-11-arm64, os: windows-11-arm }
+          - { id: ubuntu-22.04-x64, os: ubuntu-22.04 }
+          - { id: ubuntu-22.04-arm64, os: ubuntu-22.04-arm }
+          - { id: ubuntu-24.04-x64, os: ubuntu-24.04 }
+          - { id: ubuntu-24.04-arm64, os: ubuntu-24.04-arm }
+          - { id: macos-14-arm64, os: macos-14 }
+          - { id: macos-15-arm64, os: macos-15 }
+          - { id: macos-15-x64, os: macos-15-intel }
+          - { id: macos-26-arm64, os: macos-26 }
+          - { id: macos-26-x64, os: macos-26-intel }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Download, verify, and compile the published Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: python -m build_tools.ci_cli published-release-smoke --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --artifacts artifacts --fixture fixtures/minimal.nsi
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: published-installer-${{ matrix.id }}
+          path: 'artifacts/published smoke/smoke-installer.exe'
+          if-no-files-found: error
+          retention-days: 7
+
+  install-published-release:
+    name: Install published Release output (${{ matrix.id }})
+    needs: compile-published-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: windows-2022-x64, os: windows-2022 }
+          - { id: windows-2025-x64, os: windows-2025 }
+          - { id: windows-11-arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: published-installer-*
+          path: artifacts/installers
+      - name: Install, verify, and uninstall every published Release output
+        run: python -m build_tools.ci_cli published-installers-smoke --installers artifacts/installers --install-root artifacts/installed

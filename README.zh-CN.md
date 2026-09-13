@@ -67,7 +67,7 @@ Linux 主机需要 glibc 2.17 或更高版本，不支持 Alpine Linux 等使用
 
 1. 按照 [登记上游版本](docs/upstream-registration.md) 登记配置，如发布版本已有配置则无需重新登记。
 2. （可选）运行本地测试：`python -m unittest discover -s tests -v`
-3. 推送 `v<upstream-version>-<local-label>`（如 `v3.12-r1`） 格式的标签，工作流会自动发布 Release。
+3. 推送 `v<upstream-version>-<local-label>`（如 `v3.12-r1`）格式的标签，工作流会自动发布并测试 Release。
 
 ## 许可证
 

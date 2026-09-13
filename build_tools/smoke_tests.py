@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from pathlib import Path
@@ -58,7 +59,11 @@ def host_smoke(config: dict, config_path: Path, upstream_config: Path, toolset_v
 
 def release_package_smoke(config: dict, archive: Path, destination: Path, smoke: Path, fixture: Path) -> None:
     packaging.verify_zip(config, archive, destination)
-    _compile_with_launcher(config, destination, fixture, smoke, [destination.resolve() / "makensis"])
+    if os.name == "nt":
+        launcher = ["cmd.exe", "/d", "/c", destination.resolve() / "makensis.cmd"]
+    else:
+        launcher = [destination.resolve() / "makensis"]
+    _compile_with_launcher(config, destination, fixture, smoke, launcher)
 
 
 def test_installer(installer: Path, install_root: Path) -> None:
@@ -84,3 +89,12 @@ def test_all_installers(config: dict, installers: Path, install_root: Path) -> N
     """Run installers produced by every configured compiler host."""
     for rid in config["hosts"]:
         test_installer(installers / f"installer-{rid}" / "smoke-installer.exe", install_root / rid)
+
+
+def test_published_installers(installers: Path, install_root: Path) -> None:
+    """Install and uninstall every installer produced by the post-release host matrix."""
+    found = sorted(installers.rglob("smoke-installer.exe"))
+    if not found:
+        raise RuntimeError(f"no published-package installers found under {installers}")
+    for installer in found:
+        test_installer(installer, install_root / installer.parent.name)

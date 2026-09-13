@@ -67,7 +67,7 @@ The Linux hosts require glibc 2.17 or later. Alpine Linux and other musl-based s
 
 1. Register the config by following [Register an upstream release](docs/upstream-registration.md); skip this step if the release version already has a config.
 2. (Optional) Run the local tests: `python -m unittest discover -s tests -v`
-3. Push a tag in the `v<upstream-version>-<local-label>` format (for example, `v3.12-r1`), and the workflow will publish the Release automatically.
+3. Push a tag in the `v<upstream-version>-<local-label>` format (for example, `v3.12-r1`), and the workflow will publish and test the Release automatically.
 
 ## License
 

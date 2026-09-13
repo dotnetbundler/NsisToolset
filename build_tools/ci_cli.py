@@ -10,7 +10,14 @@ import sys
 import tarfile
 from pathlib import Path
 
-from . import configuration, native_build, release, smoke_tests, upstream
+from . import (
+    configuration,
+    native_build,
+    published_release,
+    release,
+    smoke_tests,
+    upstream,
+)
 
 
 class Arguments(argparse.Namespace):
@@ -28,6 +35,8 @@ class Arguments(argparse.Namespace):
     fixture: Path
     installers: Path
     install_root: Path
+    tag: str
+    repository: str
     stage: Path
     hosts: Path
     dist: Path
@@ -61,6 +70,20 @@ def create_parser() -> argparse.ArgumentParser:
     command = commands.add_parser("installer-smoke")
     command.add_argument("--installers", type=Path, required=True)
     command.add_argument("--install-root", type=Path, required=True)
+
+    command = commands.add_parser("published-release-smoke")
+    command.add_argument("--tag", required=True)
+    command.add_argument("--repository", required=True)
+    command.add_argument("--upstream-dir", type=Path, default=configuration.DEFAULT_UPSTREAM_DIR)
+    command.add_argument("--artifacts", type=Path, required=True)
+    command.add_argument("--fixture", type=Path, required=True)
+
+    command = commands.add_parser("published-installers-smoke")
+    command.add_argument("--installers", type=Path, required=True)
+    command.add_argument("--install-root", type=Path, required=True)
+
+    command = commands.add_parser("dispatch-post-release-tests")
+    command.add_argument("--tag", required=True)
 
     command = commands.add_parser("assemble-and-verify")
     command.add_argument("--stage", type=Path, required=True)
@@ -102,6 +125,25 @@ def _installer_smoke(config: dict, args: Arguments) -> None:
     smoke_tests.test_all_installers(config, args.installers, args.install_root)
 
 
+def _published_release_smoke(args: Arguments) -> None:
+    published_release.download_verify_and_compile(
+        args.config,
+        args.upstream_dir,
+        args.tag,
+        args.repository,
+        args.artifacts,
+        args.fixture,
+    )
+
+
+def _published_installers_smoke(args: Arguments) -> None:
+    smoke_tests.test_published_installers(args.installers, args.install_root)
+
+
+def _dispatch_post_release_tests(args: Arguments) -> None:
+    release.start_post_release_tests(args.tag)
+
+
 def _assemble_and_verify(config: dict, args: Arguments) -> None:
     archive = release.assemble(config, args.stage, args.hosts, args.artifacts)
     smoke_tests.release_package_smoke(config, archive, args.artifacts / "release package", args.artifacts / "release package smoke", args.fixture)
@@ -111,7 +153,15 @@ def _publish(config: dict, args: Arguments) -> None:
     release.publish(config, args.dist)
 
 
-COMMANDS = {
+DIRECT_COMMANDS = {
+    "prepare": _prepare,
+    "published-release-smoke": _published_release_smoke,
+    "published-installers-smoke": _published_installers_smoke,
+    "dispatch-post-release-tests": _dispatch_post_release_tests,
+}
+
+
+CONFIGURED_COMMANDS = {
     "host-smoke": _host_smoke,
     "native-build-twice": _native_build_twice,
     "installer-smoke": _installer_smoke,
@@ -123,10 +173,14 @@ COMMANDS = {
 def main() -> None:
     parser = create_parser()
     args = parser.parse_args(namespace=Arguments())
-    if args.command == "prepare":
-        return _prepare(args)
+
+    direct_command = DIRECT_COMMANDS.get(args.command)
+    if direct_command is not None:
+        direct_command(args)
+        return
+
     config = _load_config(args, parser)
-    COMMANDS[args.command](config, args)
+    CONFIGURED_COMMANDS[args.command](config, args)
 
 
 if __name__ == "__main__":

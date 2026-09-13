@@ -106,6 +106,7 @@ jobs:
     needs: [prepare, hosts-smoke, installer-smoke]
     runs-on: ubuntu-24.04
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@v7.0.1
@@ -136,3 +137,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m build_tools.ci_cli --upstream-config "${{ needs.prepare.outputs.upstream-config }}" --toolset-version "${{ needs.prepare.outputs.toolset-version }}" publish --dist artifacts/dist
+      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        name: Start the published Release tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m build_tools.ci_cli dispatch-post-release-tests --tag "$GITHUB_REF_NAME"
