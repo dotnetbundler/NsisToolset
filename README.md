@@ -8,6 +8,8 @@ NsisToolset packages NSIS as a portable toolset for Windows, Linux, and macOS. D
 
 Download `nsis-toolset-<version>.zip` from the matching [GitHub Release](https://github.com/dotnetbundler/NsisToolset/releases).
 
+See [Release file structure](docs/release-file-structure.md) for the release assets and the directory layout inside the ZIP.
+
 ### Verification (optional)
 
 Download the `.sha256` file to verify the ZIP.
@@ -59,9 +61,19 @@ If the extraction tool did not preserve executable permissions, run:
 chmod +x makensis hosts/*/makensis
 ```
 
-#### Linux compatibility
+## System support
 
-The Linux hosts require glibc 2.17 or later. Alpine Linux and other musl-based systems are not supported.
+The following requirements apply to the hosts running the toolset; generated installers run on Windows.
+
+| System | Host architectures | Version requirements |
+| --- | --- | --- |
+| Windows | x86, x64, ARM64 | [Windows 2000+](https://sourceforge.net/p/nsis/mailman/message/30230037/). |
+| Linux | x64, ARM64 | glibc 2.17 or later. |
+| macOS | x64 (Intel), ARM64 (Apple Silicon) | macOS 10.13+. |
+
+The minimum Windows version follows the compiler compatibility target stated by an upstream developer. For cross-architecture execution on Windows, see Microsoft's [WOW64 documentation](https://learn.microsoft.com/en-us/windows/win32/winprog64/running-32-bit-applications) and [Arm emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation).
+
+Linux requires the `zlib` compression library (`libz.so.1`) and glibc's character encoding conversion modules, which read non-UTF-8 scripts and language files such as those encoded in CP936. Standard systems usually include these components; minimal systems may need to install them through the distribution's package manager.
 
 ## Release process
 
