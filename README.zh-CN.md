@@ -63,7 +63,7 @@ chmod +x makensis hosts/*/makensis
 
 ## 系统支持
 
-以下为运行工具集的宿主系统要求；生成的安装器用于 Windows。
+### 工具集
 
 | 系统    | 宿主架构                             | 版本要求                                                                    |
 | ------- | ------------------------------------ | --------------------------------------------------------------------------- |
@@ -74,6 +74,17 @@ chmod +x makensis hosts/*/makensis
 Windows 最低版本按上游开发者说明的编译器兼容目标记录。Windows 的跨架构运行机制参见微软的 [WOW64 说明](https://learn.microsoft.com/en-us/windows/win32/winprog64/running-32-bit-applications)和 [ARM 仿真说明](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation)。
 
 Linux 依赖 `zlib` 压缩库（`libz.so.1`）和 glibc 的字符编码转换组件，后者用于读取 CP936 等非 UTF-8 脚本和语言文件。常规系统通常已包含这些组件，精简系统可能需要通过发行版的软件包补齐。
+
+### 生成的安装器
+
+生成的安装器用于 Windows，最低系统版本按 [NSIS 官方手册的兼容范围](https://nsis.sourceforge.io/Docs/Chapter1.html)记录：
+
+| 安装器模式                      | 最低系统版本                               |
+| ------------------------------- | ------------------------------------------ |
+| Unicode（`Unicode true`，默认） | Windows NT 4.0+。不支持 Windows 95/98/ME。 |
+| ANSI（`Unicode false`）         | Windows 95+ 或 Windows NT 4.0+。           |
+
+NSIS 从 [3.07 起默认生成 Unicode 安装器](https://nsis.sourceforge.io/Docs/AppendixF.html#v3.07)。脚本调用的系统功能和插件可能提高安装器的最低系统要求；被安装程序的系统要求也需单独确认。上述为上游基础兼容范围，不代表本仓库已在所有旧版 Windows 上验证，发布前应在目标最低版本上测试。
 
 ## 发布流程
 
